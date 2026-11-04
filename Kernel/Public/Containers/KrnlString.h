@@ -157,6 +157,17 @@ public:
 	FORCEINLINE bool InitializeFromCString(const WIDECHAR* Str) noexcept { return this->InitializeFromCStringImpl<WIDECHAR>(Str); }
 	FORCEINLINE bool InitializeFromCString(const UTF8CHAR* Str) noexcept { return this->InitializeFromCStringImpl<UTF8CHAR>(Str); }
 
+	/**
+	 * @brief Replaces this string with an explicitly sized source range.
+	 *
+	 * The source need not be null-terminated. A zero length produces an empty
+	 * string with a null terminator, but String must still be non-null.
+	 *
+	 * @param String Non-null pointer to the source elements.
+	 * @param StrLength Number of source elements, not a byte count in general.
+	 * @return True on success. False for invalid input, conversion failure, or
+	 * allocation failure; the existing string remains unchanged on failure.
+	 */
 	FORCEINLINE bool InitializeWithLength(const ANSICHAR* String, int32 StrLength) noexcept { return this->InitializeWithLengthImpl<ANSICHAR>(String, StrLength); }
 	FORCEINLINE bool InitializeWithLength(const WIDECHAR* String, int32 StrLength) noexcept { return this->InitializeWithLengthImpl<WIDECHAR>(String, StrLength); }
 	FORCEINLINE bool InitializeWithLength(const UTF8CHAR* String, int32 StrLength) noexcept { return this->InitializeWithLengthImpl<UTF8CHAR>(String, StrLength); }
@@ -819,6 +830,11 @@ public:
 	//template <typename T, typename TEnableIf<TIsWideCharRangeNotCArrayNotFKrnlString<T>::Value>::Type* = nullptr>
 	//NODISCARD FORCEINLINE friend FKrnlString operator+(FKrnlString&& Lhs, T&& Rhs) { return ConcatFR(MoveTemp(Lhs), GetData(Rhs), GetNum(Rhs)); }
 
+	static FORCEINLINE void Swap(FKrnlString& First, FKrnlString& Second) noexcept
+	{
+		DataType::Swap(First.Data, Second.Data);
+	}
+
 	FORCEINLINE FKrnlString& operator/=(const WIDECHAR* Str)
 	{
 		CORE_CHECK(Str);
@@ -1068,9 +1084,9 @@ public:
 		return MoveTemp(*this);
 	}
 
-	FORCEINLINE void RightChopInline(int32 Count, bool bAllowShrinking = true)
+	FORCEINLINE bool RightChopInline(int32 Count, bool bAllowShrinking = true)
 	{
-		RemoveAt(0, Count, bAllowShrinking);
+		return RemoveAt(0, Count, bAllowShrinking);
 	}
 
 	NODISCARD FKrnlString Mid(int32 Start, int32 Count) const&;
@@ -1158,7 +1174,16 @@ public:
 
 	NODISCARD FORCEINLINE bool FindLastChar(WIDECHAR InChar, int32& Index) const
 	{
-		return Data.FindLast(InChar, Index);
+		for (Index = Len(); Index > 0;)
+		{
+			--Index;
+			if (Data.GetData()[Index] == InChar)
+			{
+				return true;
+			}
+		}
+		Index = INDEX_NONE;
+		return false;
 	}
 
 	NODISCARD FORCEINLINE bool Equals(const FKrnlString& Other, ESearchCase::Type SearchCase = ESearchCase::CaseSecsitive) const
@@ -1174,8 +1199,8 @@ public:
 		else if (Num > 1)
 		{
 			return SearchCase == ESearchCase::CaseSecsitive
-				? Strcmp(Data.GetData(), Other.Data.GetData())
-				: Stricmp(Data.GetData(), Other.Data.GetData());
+				? TCString<TArrayCharType>::Strcmp(Data.GetData(), Other.Data.GetData()) == 0
+				: TCString<TArrayCharType>::Stricmp(Data.GetData(), Other.Data.GetData()) == 0;
 		}
 
 		return true;
@@ -1236,6 +1261,82 @@ public:
 
 		AppendImpl(*this, (const WIDECHAR*)Fmt, Args...);
 		return *this;
+	}
+
+	/**
+	 * @brief Replaces the first matching character without changing the string length.
+	 * @param From Character to find; must not be the null terminator.
+	 * @param To Replacement character; must differ from From and must not be null.
+	 * @param OutFindIndex Optional output for the replaced index. Receives
+	 * INDEX_NONE when no match exists; remains unchanged for invalid characters.
+	 * @return True if a character was replaced, otherwise false.
+	 */
+	FORCEINLINE bool Replace(WIDECHAR From, WIDECHAR To, SizeType* const OutFindIndex) noexcept
+	{
+		if (From == (WIDECHAR)0 || To == (WIDECHAR)0)
+		{
+			return false;
+		}
+		if (From == To)
+		{
+			return false;
+		}
+
+		SizeType Index = 0;
+		bool bFindSuccess = FindChar(From, Index);
+		if (!bFindSuccess)
+		{
+			if (OutFindIndex)
+			{
+				*OutFindIndex = Index;
+			}
+			return false;
+		}
+
+		Data.GetData()[Index] = To;
+		if (OutFindIndex)
+		{
+			*OutFindIndex = Index;
+		}
+
+		return true;
+	}
+
+	/**
+	 * @brief Replaces every matching character in one pass.
+	 * @param From Character to find; must not be the null terminator.
+	 * @param To Replacement character; must differ from From and must not be null.
+	 * @param OutFindCount Optional output for the number of replacements; set to
+	 * zero when no match exists or the characters are invalid.
+	 * @return True if at least one character was replaced, otherwise false.
+	 */
+	FORCEINLINE bool ReplaceAll(WIDECHAR From, WIDECHAR To, SizeType* const OutFindCount) noexcept
+	{
+		if (OutFindCount)
+		{
+			*OutFindCount = 0;
+		}
+		if (From == (WIDECHAR)0 || To == (WIDECHAR)0 || From == To)
+		{
+			return false;
+		}
+
+		SizeType FindCount = 0;
+		for (SizeType Index = 0; Index < Len(); ++Index)
+		{
+			if (Data.GetData()[Index] == From)
+			{
+				Data.GetData()[Index] = To;
+				++FindCount;
+			}
+		}
+
+		if (OutFindCount)
+		{
+			*OutFindCount = FindCount;
+		}
+
+		return FindCount != 0;
 	}
 
 private:
