@@ -3,6 +3,7 @@
 #include "Core/Public/Notify/ProcessNotifyTypes.h"
 #include "Core/Public/Templates/IsTriviallyRelocatable.h"
 #include "Kernel/Public/Misc/KernelDefines.h"
+#include "Kernel/Public/Containers/KrnlString.h"
 
 namespace Argus::Notify
 {
@@ -15,12 +16,9 @@ namespace Argus::Notify
 		uint32 ParentProcessId = 0;
 		uint32 CreatingThreadId = 0;
 		uint32 CreatingProcessId = 0;
-		uint16 CommandLineChars = 0;
-		PWCHAR CommandLine = nullptr;
+		FString<> CommandLine;
+		FString<> ImageFileName;
 
-		//EImageFileNameStatus ImageFileNameStatus = EImageFileNameStatus::None;
-		uint16 ImageFileNameChars = 0;
-		PWCHAR ImageFileName = nullptr;
 		uint32 ExitCode = 0;
 		uint32 CreationStatus = STATUS_SUCCESS;
 
@@ -34,79 +32,52 @@ namespace Argus::Notify
 		FProcessNotifyInfo& operator=(const FProcessNotifyInfo&) = delete;
 
 		FProcessNotifyInfo(FProcessNotifyInfo&& Other) noexcept
-			: NotifyType(Other.NotifyType)
-			, CreatedAt(Other.CreatedAt)
-			, ExitedAt(Other.ExitedAt)
-			, ProcessId(Other.ProcessId)
-			, ParentProcessId(Other.ParentProcessId)
-			, CreatingThreadId(Other.CreatingThreadId)
-			, CreatingProcessId(Other.CreatingProcessId)
-			, CommandLineChars(Other.CommandLineChars)
-			, CommandLine(Other.CommandLine)
-			, ImageFileNameChars(Other.ImageFileNameChars)
-			, ImageFileName(MoveTemp(Other.ImageFileName))
-			, ExitCode(Other.ExitCode)
-			, CreationStatus(Other.CreationStatus)
 		{
-			Other.NotifyType		 = EProcessNotifyType::Unknown;
-			Other.CommandLineChars	 = 0;
-			Other.CommandLine		 = nullptr;
-			Other.ImageFileNameChars = 0;
-			Other.ImageFileName		 = nullptr;
+			this->MoveFrom(Other);
 		}
 
 		FProcessNotifyInfo& operator=(FProcessNotifyInfo&& Other) noexcept
 		{
 			if (this != &Other)
 			{
-				if (CommandLine != nullptr)
-				{
-					ExFreePool(CommandLine);
-				}
-				if (ImageFileName != nullptr)
-				{
-					ExFreePool(ImageFileName);
-				}
-
-				NotifyType		   = Other.NotifyType;
-				CreatedAt		   = Other.CreatedAt;
-				ExitedAt		   = Other.ExitedAt;
-				ProcessId		   = Other.ProcessId;
-				ParentProcessId	   = Other.ParentProcessId;
-				CreatingThreadId   = Other.CreatingThreadId;
-				CreatingProcessId  = Other.CreatingProcessId;
-				CommandLineChars   = Other.CommandLineChars;
-				CommandLine		   = Other.CommandLine;
-				ImageFileNameChars = Other.ImageFileNameChars;
-				ImageFileName	   = Other.ImageFileName;
-				ExitCode		   = Other.ExitCode;
-				CreationStatus	   = Other.CreationStatus;
-
-				Other.NotifyType		 = EProcessNotifyType::Unknown;
-				Other.CommandLineChars	 = 0;
-				Other.CommandLine		 = nullptr;
-				Other.ImageFileNameChars = 0;
-				Other.ImageFileName		 = nullptr;
+				this->ResetStrings();
+				this->MoveFrom(Other);
 			}
 			return *this;
 		}
 
-		~FProcessNotifyInfo() noexcept
+		~FProcessNotifyInfo() noexcept = default;
+
+	private:
+		using FStringArray = TArray<EPoolType::Paged, WIDECHAR>;
+
+		void ResetStrings() noexcept
 		{
-			if (CommandLine != nullptr)
-			{
-				ExFreePool(CommandLine);
-			}
-			if (ImageFileName != nullptr)
-			{
-				ExFreePool(ImageFileName);
-			}
+			FString<> EmptyCommandLine;
+			FString<> EmptyImageFileName;
+			FStringArray::Swap(this->CommandLine.GetCharArray(), EmptyCommandLine.GetCharArray());
+			FStringArray::Swap(this->ImageFileName.GetCharArray(), EmptyImageFileName.GetCharArray());
+		}
+
+		void MoveFrom(FProcessNotifyInfo& Other) noexcept
+		{
+			this->NotifyType = Other.NotifyType;
+			this->CreatedAt = Other.CreatedAt;
+			this->ExitedAt = Other.ExitedAt;
+			this->ProcessId = Other.ProcessId;
+			this->ParentProcessId = Other.ParentProcessId;
+			this->CreatingThreadId = Other.CreatingThreadId;
+			this->CreatingProcessId = Other.CreatingProcessId;
+			this->ExitCode = Other.ExitCode;
+			this->CreationStatus = Other.CreationStatus;
+			FStringArray::Swap(this->CommandLine.GetCharArray(), Other.CommandLine.GetCharArray());
+			FStringArray::Swap(this->ImageFileName.GetCharArray(), Other.ImageFileName.GetCharArray());
+			Other.NotifyType = EProcessNotifyType::Unknown;
 		}
 	};
 }
 
-// The strings live in separate pool allocations. Relocation transfers their
-// pointers and abandons the old record without invoking its destructor.
+// Relocation transfers the FString allocations and their non-owning views.
 template <>
 struct TIsTriviallyRelocatable<Argus::Notify::FProcessNotifyInfo>
 {

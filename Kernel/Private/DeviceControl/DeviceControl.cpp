@@ -129,24 +129,32 @@ NTSTATUS DeviceControlGetProcessNotify(FDriverContext* Context, PDEVICE_OBJECT D
 		Slot.Record.ExitCode		= Info.ExitCode;
 		Slot.Record.CreationStatus  = Info.CreationStatus;
 
-		const uint32 CommandLineBytes = static_cast<uint32>(Info.CommandLineChars) * sizeof(WCHAR);
-		if (Info.CommandLine != nullptr)
+		const WIDECHAR* CommandLineBuffer = Info.CommandLine.GetCharArray().GetData();
+		const uint32 CommandLineLength = static_cast<uint32>(Info.CommandLine.Len());
+		const uint32 CommandLineBytes = CommandLineLength * sizeof(WCHAR);
+		if (CommandLineBuffer != nullptr)
 		{
-			const uint32 CommandBufferBytes = CoreMin(CommandLineBytes, sizeof(Slot.CommandLine) - sizeof(WCHAR));
+			const uint32 CommandBufferBytes = CoreMin(CommandLineBytes, sizeof(Slot.CommandLine));
 			Slot.Record.CommandLineBytes = CommandBufferBytes;
 			
 			if (CommandBufferBytes != 0)
 			{
-				RtlCopyMemory(Slot.CommandLine, Info.CommandLine, CommandBufferBytes);
+				RtlCopyMemory(Slot.CommandLine, CommandLineBuffer, CommandBufferBytes);
 			}
 		}
-		const uint32 ImageFileNameBytes = static_cast<uint32>(Info.ImageFileNameChars) * sizeof(WCHAR);
-		if (Info.ImageFileName != nullptr && ImageFileNameBytes <= sizeof(Slot.ImageFileName))
-		//if (!Info.ImageFileName.IsEmpty() && ImageFileNameBytes <= sizeof(Slot.ImageFileName))
+
+		const WIDECHAR* ImageFileNameBuffer = Info.ImageFileName.GetCharArray().GetData();
+		const uint32 ImageFileNameLength = Info.ImageFileName.Len();
+		const uint32 ImageFileNameBytes = static_cast<uint32>(ImageFileNameLength) * sizeof(WCHAR);
+		if (ImageFileNameBuffer != nullptr)
 		{
-			Slot.Record.ImageFileNameBytes = ImageFileNameBytes;
-			RtlCopyMemory(Slot.ImageFileName, Info.ImageFileName, ImageFileNameBytes);
-			//Info.ImageFileName.Append(Slot.ImageFileName);
+			const uint32 ImageFileNameBufferBytes = CoreMin(ImageFileNameBytes, sizeof(Slot.ImageFileName));
+			Slot.Record.ImageFileNameBytes = ImageFileNameBufferBytes;
+
+			if (ImageFileNameBufferBytes != 0)
+			{
+				RtlCopyMemory(Slot.ImageFileName, ImageFileNameBuffer, ImageFileNameBufferBytes);
+			}
 		}
 
 		const size_t SlotStride = static_cast<size_t>(NumWrite) * SlotBytes;

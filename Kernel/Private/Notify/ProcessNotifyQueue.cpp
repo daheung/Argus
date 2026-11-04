@@ -34,52 +34,31 @@ void FProcessNotifyQueue::OnProcessCreateNotify(PEPROCESS Process, HANDLE Proces
 	ProcessInfo.CreationStatus	  = CreateInfo->CreationStatus;
 
 	PCUNICODE_STRING CommandLine = CreateInfo->CommandLine;
-	if (CommandLine != nullptr && CommandLine->Length > 0)
+	if (CommandLine != nullptr && CommandLine->Buffer != nullptr &&
+		CommandLine->Length / sizeof(FString<>::ElementType))
 	{
-		//uint16 CommandBufferSize = CoreMin(ProcessNotifyMaxCommandLine, CommandLine->Length);
-		uint16 CommandBufferSize = CommandLine->Length;
-		WCHAR* CommandBuffer = static_cast<WCHAR*>(ExAllocatePool2(POOL_FLAG_PAGED, CommandBufferSize + sizeof(WCHAR), 'NsPk'));
-		if (CommandBuffer != nullptr)
-		{
-			RtlCopyMemory(CommandBuffer, CommandLine->Buffer, CommandBufferSize);
-			CommandBuffer[CommandBufferSize / sizeof(WCHAR)] = L'\0';
-
-			ProcessInfo.CommandLine = CommandBuffer;
-			ProcessInfo.CommandLineChars = CommandBufferSize / sizeof(WCHAR);
-		}
-	}
-	else
-	{
-		ProcessInfo.CommandLineChars = 0;
+		ProcessInfo.CommandLine.InitializeWithLength(
+			CommandLine->Buffer, CommandLine->Length / sizeof(FString<>::ElementType));
 	}
 
 	PCUNICODE_STRING ImageFileName = CreateInfo->ImageFileName;
-	if (ImageFileName != nullptr && ImageFileName->Buffer != nullptr &&
-		ImageFileName->Length >= sizeof(WCHAR) && ImageFileName->Length % sizeof(WCHAR) == 0)
+	if (ImageFileName != nullptr && ImageFileName->Buffer != nullptr && 
+		ImageFileName->Length / sizeof(FString<>::ElementType))
 	{
 		const uint16 ImageChars = ImageFileName->Length / sizeof(WCHAR);
-		uint16 BaseNameStart = 0;
-		for (uint16 Index = 0; Index < ImageChars; ++Index)
+		FString<> ImagePath;
+		if (ImagePath.InitializeWithLength(ImageFileName->Buffer, ImageChars))
 		{
-			if (ImageFileName->Buffer[Index] == L'\\' || ImageFileName->Buffer[Index] == L'/')
-			{
-				BaseNameStart = Index + 1;
-			}
-		}
+			ImagePath.ReplaceAll(L'/', L'\\', nullptr);
 
-		const uint16 BaseNameChars = ImageChars - BaseNameStart;
-		const uint32 BaseNameBytes = static_cast<uint32>(BaseNameChars) * sizeof(WCHAR);
-		if (BaseNameBytes != 0 && BaseNameBytes <= Argus::Notify::ProcessNotifyMaxImageFileNameBytes)
-		{
-			WCHAR* BaseName = static_cast<WCHAR*>(ExAllocatePool2(
-				POOL_FLAG_PAGED, BaseNameBytes + sizeof(WCHAR), 'NmPk'));
-			if (BaseName != nullptr)
+			int32 LastSeparator = INDEX_NONE;
+			const int32 BaseNameStart = ImagePath.FindLastChar(L'\\', LastSeparator) ? LastSeparator + 1 : 0;
+			if (BaseNameStart != 0)
 			{
-				RtlCopyMemory(BaseName, ImageFileName->Buffer + BaseNameStart, BaseNameBytes);
-				BaseName[BaseNameChars] = L'\0';
-				ProcessInfo.ImageFileName = BaseName;
-				ProcessInfo.ImageFileNameChars = BaseNameChars;
+				ImagePath.RightChopInline(BaseNameStart);
 			}
+
+			FString<>::Swap(ImagePath, ProcessInfo.ImageFileName);
 		}
 	}
 
