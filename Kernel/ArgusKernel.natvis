@@ -1,0 +1,37 @@
+
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+  <Type Name="TKrnlArray&lt;*,*,*&gt;">
+
+    <DisplayString Condition="ArrayNum &lt; 0 || ArrayMax &lt; 0 || ArrayNum &gt; ArrayMax">
+      Invalid (Num={ArrayNum}, Max={ArrayMax})
+    </DisplayString>
+
+    <DisplayString Condition="ArrayNum == 0">
+      Empty, Max={ArrayMax}
+    </DisplayString>
+
+    <DisplayString>
+      Num={ArrayNum}, Max={ArrayMax}
+    </DisplayString>
+
+    <Expand>
+      <Item Name="[Num]">ArrayNum</Item>
+      <Item Name="[Max]">ArrayMax</Item>
+      <Item Name="[Allocator]">Allocator</Item>
+
+      <Item Name="[Data]" Optional="true">
+        ($T2*)Allocator.Data
+      </Item>
+
+      <ArrayItems Optional="true"
+                  Condition="ArrayNum &gt; 0 &amp;&amp; ArrayNum &lt;= ArrayMax">
+        <Size>ArrayNum</Size>
+        <ValuePointer>($T2*)Allocator.Data</ValuePointer>
+      </ArrayItems>
+    </Expand>
+
+  </Type>
+
+</AutoVisualizer>

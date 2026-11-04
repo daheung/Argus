@@ -1,0 +1,12 @@
+.build/
+.codex-backups/
+.refactor-backups/
+Tools/
+/Argus.zip
+
+# Signing keys and local credentials
+*.pfx
+*.p12
+.env
+.env.*
+!.env.example

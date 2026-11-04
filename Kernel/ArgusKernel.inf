@@ -1,0 +1,54 @@
+; ArgusKernel minifilter installation for Windows 11 24H2 and later.
+; TEST ONLY: replace TestAltitude with a Microsoft-assigned altitude before distribution.
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = ActivityMonitor
+ClassGuid   = {b86dff51-a31e-4bac-b3cf-e8cfe75c9fc2}
+Provider    = %ProviderName%
+DriverVer   = 10/27/2026,0.1.0.0
+CatalogFile = ArgusKernel.cat
+PnpLockdown = 1
+
+[SourceDisksNames]
+1 = %DiskDescription%,,,
+
+[SourceDisksFiles]
+ArgusKernel.sys = 1,,
+
+[DestinationDirs]
+ArgusKernel.DriverFiles = 13
+
+[DefaultInstall.NTamd64]
+OptionDesc = %ServiceDescription%
+CopyFiles  = ArgusKernel.DriverFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService = %ServiceName%,,ArgusKernel.Service
+
+[ArgusKernel.Service]
+DisplayName    = %ServiceName%
+Description    = %ServiceDescription%
+ServiceBinary  = %13%\ArgusKernel.sys
+ServiceType    = 2
+StartType      = 3
+ErrorControl   = 1
+LoadOrderGroup = "FSFilter Activity Monitor"
+Dependencies   = FltMgr
+AddReg         = ArgusKernel.AddRegistry
+
+[ArgusKernel.AddRegistry]
+HKR,"Parameters\Instances","DefaultInstance",0x00000000,%DefaultInstance%
+HKR,"Parameters\Instances\%DefaultInstance%","Altitude",0x00000000,%TestAltitude%
+HKR,"Parameters\Instances\%DefaultInstance%","Flags",0x00010001,0
+
+[ArgusKernel.DriverFiles]
+ArgusKernel.sys
+
+[Strings]
+ProviderName       = "Argus"
+ServiceName        = "ArgusKernel"
+ServiceDescription = "Argus kernel driver and file system activity monitor"
+DiskDescription    = "ArgusKernel installation files"
+DefaultInstance    = "ArgusKernel Instance"
+TestAltitude       = "385123.1028"
