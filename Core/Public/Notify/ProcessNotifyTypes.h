@@ -9,11 +9,9 @@ namespace Argus::Notify
 
 	enum class EProcessNotifyType : uint8
 	{
-		Unknown,
-		Created,
-		Exited,
-		
-		CreationDenied,
-		CreationFailed,
+		None   = 0,
+		Create = 1,
+		Exit   = 2,
+		Both   = 3
 	};
 }

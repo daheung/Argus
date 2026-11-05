@@ -4,10 +4,10 @@
 
 extern "C" UCHAR* PsGetProcessImageFileName(PEPROCESS Process);
 
-void FProcessCallback::OnProcessCreateNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo)
+void FProcessCallback::OnProcessCreateNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo, Argus::Notify::FProcessNotifyPolicy& OutProcessPolicy)
 {
 	CORE_CHECK(GDriverContext != nullptr);
-	this->ApplyRule(*GDriverContext, Process, ProcessId, CreateInfo);
+	this->ApplyRule(*GDriverContext, Process, ProcessId, CreateInfo, OutProcessPolicy);
 }
 
 void FProcessCallback::OnProcessExitNotify(PEPROCESS Process, HANDLE ProcessId)
@@ -16,12 +16,22 @@ void FProcessCallback::OnProcessExitNotify(PEPROCESS Process, HANDLE ProcessId)
 	UNREFERENCED_PARAMETER(ProcessId);
 }
 
-void FProcessCallback::ApplyRule(FDriverContext& Context, PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo) noexcept
+void FProcessCallback::ApplyRule(
+	FDriverContext& Context, 
+	PEPROCESS Process, 
+	HANDLE ProcessId, 
+	PPS_CREATE_NOTIFY_INFO CreateInfo, 
+	Argus::Notify::FProcessNotifyPolicy& ProcessPolicy) noexcept
 {
-	FProcessCreateRules::ApplyRule(Context, Process, ProcessId, CreateInfo);
+	FProcessCreateRules::ApplyRule(Context, Process, ProcessId, CreateInfo, ProcessPolicy);
 }
 
-void FProcessCallback::FProcessCreateRules::ApplyRule(FDriverContext& Context, PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo) noexcept
+void FProcessCallback::FProcessCreateRules::ApplyRule(
+	FDriverContext& Context, 
+	PEPROCESS Process, 
+	HANDLE ProcessId, 
+	PPS_CREATE_NOTIFY_INFO CreateInfo, 
+	Argus::Notify::FProcessNotifyPolicy& ProcessPolicy) noexcept
 {
 	UNREFERENCED_PARAMETER(Process);
 
@@ -43,15 +53,22 @@ void FProcessCallback::FProcessCreateRules::ApplyRule(FDriverContext& Context, P
 			HandleToULong(ProcessId)
 		);
 
-		ApplyIsolationProcessRule(Context, CreatorProcess, ProcessId, CreateInfo);
+		ApplyIsolationProcessRule(Context, CreatorProcess, ProcessId, CreateInfo, ProcessPolicy);
 	}
 
 	ObDereferenceObject(CreatorProcess);
 }
 
-void FProcessCallback::FProcessCreateRules::ApplyIsolationProcessRule(FDriverContext& Context, PEPROCESS CreatorProcess, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo) noexcept
+void FProcessCallback::FProcessCreateRules::ApplyIsolationProcessRule(
+	FDriverContext& Context, 
+	PEPROCESS CreatorProcess, 
+	HANDLE ProcessId, 
+	PPS_CREATE_NOTIFY_INFO CreateInfo,
+	Argus::Notify::FProcessNotifyPolicy& ProcessPolicy) noexcept
 {
 	UNREFERENCED_PARAMETER(ProcessId);
+	
+	ProcessPolicy.PolicyRole = Argus::Policy::EPolicyRole::IsolatedProcess;
 
 	EIsolationFlags Flags = EIsolationFlags::None;
 	const bool bGetFlagsSucceed = Context.GetIsolationProcessRegistry().GetProcessFlags(CreatorProcess, Flags);
@@ -62,6 +79,7 @@ void FProcessCallback::FProcessCreateRules::ApplyIsolationProcessRule(FDriverCon
 		const bool bIsDenyIsoProcess = (CurrentFlags & TargetFlags) != 0;
 		if (bIsDenyIsoProcess)
 		{
+			ProcessPolicy.PolicyStatus = Argus::Policy::EPolicyStatus::AccessBlocked;
 			CreateInfo->CreationStatus = STATUS_ACCESS_DENIED;
 		}
 	}

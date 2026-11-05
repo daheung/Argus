@@ -2,26 +2,41 @@
 
 #include "Core/Public/Notify/ProcessNotifyTypes.h"
 #include "Core/Public/Templates/IsTriviallyRelocatable.h"
+#include "Core/Public/Policy/PolicyTypes.h"
 #include "Kernel/Public/Misc/KernelDefines.h"
 #include "Kernel/Public/Containers/KrnlString.h"
 
 namespace Argus::Notify
 {
+	struct FProcessNotifyPolicy
+	{
+		Argus::Policy::EPolicyRole PolicyRole = Argus::Policy::EPolicyRole::None;
+		Argus::Policy::EPolicyStatus PolicyStatus = Argus::Policy::EPolicyStatus::AccessPass;
+	};
+
 	struct FProcessNotifyInfo
 	{
-		EProcessNotifyType NotifyType = EProcessNotifyType::Unknown;
+	public:
+		EProcessNotifyType NotifyType = EProcessNotifyType::None;
+
 		LARGE_INTEGER CreatedAt{};
 		LARGE_INTEGER ExitedAt{};
+
 		uint32 ProcessId = 0;
 		uint32 ParentProcessId = 0;
 		uint32 CreatingThreadId = 0;
 		uint32 CreatingProcessId = 0;
+
 		FString<> CommandLine;
 		FString<> ImageFileName;
 
 		uint32 ExitCode = 0;
 		uint32 CreationStatus = STATUS_SUCCESS;
 
+		Argus::Policy::EPolicyRole PolicyRole = Argus::Policy::EPolicyRole::None;
+		Argus::Policy::EPolicyStatus PolicyStatus = Argus::Policy::EPolicyStatus::AccessPass;
+
+	public:
 		FORCEINLINE bool operator==(const FProcessNotifyInfo& Other) const noexcept
 		{
 			return ProcessId == Other.ProcessId;
@@ -43,36 +58,37 @@ namespace Argus::Notify
 				this->ResetStrings();
 				this->MoveFrom(Other);
 			}
+
 			return *this;
 		}
 
 		~FProcessNotifyInfo() noexcept = default;
 
 	private:
-		using FStringArray = TArray<EPoolType::Paged, WIDECHAR>;
-
 		void ResetStrings() noexcept
 		{
-			FString<> EmptyCommandLine;
-			FString<> EmptyImageFileName;
-			FStringArray::Swap(this->CommandLine.GetCharArray(), EmptyCommandLine.GetCharArray());
-			FStringArray::Swap(this->ImageFileName.GetCharArray(), EmptyImageFileName.GetCharArray());
+			this->CommandLine.Empty();
+			this->ImageFileName.Empty();
 		}
 
 		void MoveFrom(FProcessNotifyInfo& Other) noexcept
 		{
-			this->NotifyType = Other.NotifyType;
-			this->CreatedAt = Other.CreatedAt;
-			this->ExitedAt = Other.ExitedAt;
-			this->ProcessId = Other.ProcessId;
-			this->ParentProcessId = Other.ParentProcessId;
-			this->CreatingThreadId = Other.CreatingThreadId;
+			this->NotifyType		= Other.NotifyType;
+			this->CreatedAt			= Other.CreatedAt;
+			this->ExitedAt			= Other.ExitedAt;
+			this->ProcessId			= Other.ProcessId;
+			this->ParentProcessId	= Other.ParentProcessId;
+			this->CreatingThreadId	= Other.CreatingThreadId;
 			this->CreatingProcessId = Other.CreatingProcessId;
-			this->ExitCode = Other.ExitCode;
-			this->CreationStatus = Other.CreationStatus;
-			FStringArray::Swap(this->CommandLine.GetCharArray(), Other.CommandLine.GetCharArray());
-			FStringArray::Swap(this->ImageFileName.GetCharArray(), Other.ImageFileName.GetCharArray());
-			Other.NotifyType = EProcessNotifyType::Unknown;
+			this->ExitCode			= Other.ExitCode;
+			this->CreationStatus	= Other.CreationStatus;
+			this->PolicyRole		= Other.PolicyRole;
+			this->PolicyStatus		= Other.PolicyStatus;
+
+			FString<>::Swap(this->CommandLine  , Other.CommandLine);
+			FString<>::Swap(this->ImageFileName, Other.ImageFileName);
+
+			Other.NotifyType = EProcessNotifyType::None;
 		}
 	};
 }

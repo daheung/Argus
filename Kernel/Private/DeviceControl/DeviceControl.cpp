@@ -86,16 +86,7 @@ NTSTATUS DeviceControlGetProcessNotify(FDriverContext* Context, PDEVICE_OBJECT D
 
 	const auto* IrpSp = IoGetCurrentIrpStackLocation(Irp);
 	const uint32 BufferLength = IrpSp->Parameters.DeviceIoControl.OutputBufferLength;
-
-	constexpr uint32 SlotBytes = sizeof(Argus::DeviceControl::FProcessNotifySlot);
-	if (BufferLength < SlotBytes)
-	{
-		return STATUS_BUFFER_TOO_SMALL;
-	}
-	if (BufferLength % SlotBytes != 0)
-	{
-		return STATUS_INVALID_BUFFER_SIZE;
-	}
+	const uint32 InputBufferLength = IrpSp->Parameters.DeviceIoControl.InputBufferLength;
 
 	auto* Buffer = static_cast<uint8*>(Irp->AssociatedIrp.SystemBuffer);
 	if (Buffer == nullptr)
@@ -103,65 +94,147 @@ NTSTATUS DeviceControlGetProcessNotify(FDriverContext* Context, PDEVICE_OBJECT D
 		return STATUS_INVALID_PARAMETER;
 	}
 
-	const uint32 BufferCount = BufferLength / SlotBytes;
-	const uint32 MaxCount = CoreMin(BufferCount, static_cast<uint32>(FProcessNotifyQueue::ProcessNotifyMaxInfos));
+	constexpr uint32 HeaderBytes = sizeof(Argus::DeviceControl::FProcessNotifyHeader);
+	if (BufferLength < HeaderBytes)
+	{
+		return STATUS_BUFFER_TOO_SMALL;
+	}
+	if (InputBufferLength < sizeof(Argus::DeviceControl::FProcessNotifyRP))
+	{
+		return STATUS_INVALID_BUFFER_SIZE;
+	}
+
+	Argus::DeviceControl::FProcessNotifyRP RequestPacket{};
+	{
+		auto* TmpRp = static_cast<Argus::DeviceControl::FObjectOperationRP*>((void*)Buffer);
+		if (TmpRp == nullptr)
+		{
+			return STATUS_INVALID_PARAMETER;
+		}
+		if (TmpRp->Version != Argus::DeviceControl::FProcessNotifyHeader::HeaderVersion)
+		{
+			return STATUS_REVISION_MISMATCH;
+		}
+
+		RequestPacket.Version		  = TmpRp->Version;
+		RequestPacket.CurRecordCount  = TmpRp->CurRecordCount;
+		RequestPacket.NextRecordCount = TmpRp->NextRecordCount;
+	}
+
 	FProcessNotifyQueue& ProcessQueue = Context->GetProcessNotifyQueue();
+	FProcessNotifyQueue::TQueue& ProcessNotifyQueue = ProcessQueue.GetQueue();
+
+	/**
+	 * [BatchHeader]
+	 * [Record 1] [CommandLine UTF - 16] [ImageFileName UTF - 16] [8-Bytes align padding]
+	 * [Record 2] [CommandLine UTF - 16] [ImageFileName UTF - 16] [8-Bytes align padding]
+	 */
 
 	uint32 NumWrite = 0;
-	for (; NumWrite < MaxCount; ++NumWrite)
+	uint64 NumWriteOffset = HeaderBytes;
+	for (;; ++NumWrite)
 	{
+		ProcessQueue.Lock(ELockType::Exclusive);
+
+		if (ProcessNotifyQueue.IsEmpty())
+		{
+			ProcessQueue.Unlock(ELockType::Exclusive);
+			break;
+		}
+
+		Argus::Notify::FProcessNotifyInfo& PeekInfo = ProcessNotifyQueue.PeekFront();
+		const uint64 CommandLineBytes	= static_cast<uint64>(PeekInfo.CommandLine.Len()) * sizeof(FString<>::ElementType);
+		const uint64 ImageFileNameBytes = static_cast<uint64>(PeekInfo.ImageFileName.Len()) * sizeof(FString<>::ElementType);
+		const uint64 RecordHeaderBytes  = sizeof(Argus::DeviceControl::FProcessNotifyRecord);
+
+		const uint64 RawBytes	  = RecordHeaderBytes + CommandLineBytes + ImageFileNameBytes;
+		const uint64 RecordBytes  = static_cast<uint64>(AlignUp(RawBytes, Argus::DeviceControl::FProcessNotifyRecord::RecordAlignment));
+		const uint64 PaddingBytes = static_cast<uint64>(RecordBytes - RawBytes);
+
+		const uint32 BufferSlack = static_cast<uint32>(BufferLength - NumWriteOffset);
+		if (BufferSlack < RecordBytes)
+		{
+			ProcessQueue.Unlock(ELockType::Exclusive);
+			break;
+		}
+
 		Argus::Notify::FProcessNotifyInfo Info;
-		if (!ProcessQueue.TryPop(Info))
+		const bool bPopSucceed = ProcessNotifyQueue.TryPop(Info);
+
+		ProcessQueue.Unlock(ELockType::Exclusive);
+
+		if (!bPopSucceed)
 		{
 			break;
 		}
 
-		Argus::DeviceControl::FProcessNotifySlot Slot;
-		RtlZeroMemory(&Slot, sizeof(Slot));
+		RtlZeroMemory(Buffer + NumWriteOffset, RecordBytes);
 
-		Slot.Record.NotifyType		= Info.NotifyType;
-		Slot.Record.CreatedAt		= Info.CreatedAt.QuadPart;
-		Slot.Record.ExitedAt		= Info.ExitedAt.QuadPart;
-		Slot.Record.ProcessId		= Info.ProcessId;
-		Slot.Record.ParentProcessId = Info.ParentProcessId;
-		Slot.Record.CreatingThreadId  = Info.CreatingThreadId;
-		Slot.Record.CreatingProcessId = Info.CreatingProcessId;
-		Slot.Record.ExitCode		= Info.ExitCode;
-		Slot.Record.CreationStatus  = Info.CreationStatus;
+		Argus::DeviceControl::FProcessNotifyRecord Record{};
+		Record.RecordHeaderBytes = sizeof(Argus::DeviceControl::FProcessNotifyRecord);
+		Record.NotifyType		 = Info.NotifyType;
+		Record.PolicyRole		 = Info.PolicyRole;
+		Record.PolicyStatus		 = Info.PolicyStatus;
+		Record.CreatedAt		 = Info.CreatedAt.QuadPart;
+		Record.ExitedAt			 = Info.ExitedAt.QuadPart;
+		Record.ProcessId		 = Info.ProcessId;
+		Record.ParentProcessId	 = Info.ParentProcessId;
+		Record.CreatingThreadId  = Info.CreatingThreadId;
+		Record.CreatingProcessId = Info.CreatingProcessId;
+		Record.ExitCode			 = Info.ExitCode;
+		Record.CreationStatus	 = Info.CreationStatus;
+		
+		Record.CommandLineOffset = NumWriteOffset + Record.RecordHeaderBytes;
+		Record.CommandLineBytes	 = CommandLineBytes;
+		Record.ImageFileNameOffset = Record.CommandLineOffset + Record.CommandLineBytes;
+		Record.ImageFileNameBytes  = ImageFileNameBytes;
+		Record.PaddingBytes = PaddingBytes;
 
-		const WIDECHAR* CommandLineBuffer = Info.CommandLine.GetCharArray().GetData();
-		const uint32 CommandLineLength = static_cast<uint32>(Info.CommandLine.Len());
-		const uint32 CommandLineBytes = CommandLineLength * sizeof(WCHAR);
-		if (CommandLineBuffer != nullptr)
+		RtlCopyMemory(&Buffer[NumWriteOffset], &Record, Record.RecordHeaderBytes);
+
+		if (CommandLineBytes != 0)
 		{
-			const uint32 CommandBufferBytes = CoreMin(CommandLineBytes, sizeof(Slot.CommandLine));
-			Slot.Record.CommandLineBytes = CommandBufferBytes;
-			
-			if (CommandBufferBytes != 0)
-			{
-				RtlCopyMemory(Slot.CommandLine, CommandLineBuffer, CommandBufferBytes);
-			}
+			RtlCopyMemory(&Buffer[Record.CommandLineOffset], Info.CommandLine.GetCharArray().GetData(), Record.CommandLineBytes);
+		}
+		if (ImageFileNameBytes != 0)
+		{
+			RtlCopyMemory(&Buffer[Record.ImageFileNameOffset], Info.ImageFileName.GetCharArray().GetData(), Record.ImageFileNameBytes);
 		}
 
-		const WIDECHAR* ImageFileNameBuffer = Info.ImageFileName.GetCharArray().GetData();
-		const uint32 ImageFileNameLength = Info.ImageFileName.Len();
-		const uint32 ImageFileNameBytes = static_cast<uint32>(ImageFileNameLength) * sizeof(WCHAR);
-		if (ImageFileNameBuffer != nullptr)
-		{
-			const uint32 ImageFileNameBufferBytes = CoreMin(ImageFileNameBytes, sizeof(Slot.ImageFileName));
-			Slot.Record.ImageFileNameBytes = ImageFileNameBufferBytes;
-
-			if (ImageFileNameBufferBytes != 0)
-			{
-				RtlCopyMemory(Slot.ImageFileName, ImageFileNameBuffer, ImageFileNameBufferBytes);
-			}
-		}
-
-		const size_t SlotStride = static_cast<size_t>(NumWrite) * SlotBytes;
-		RtlCopyMemory(Buffer + SlotStride, &Slot, SlotBytes);
+		NumWriteOffset += RecordBytes;
 	}
 
-	Irp->IoStatus.Information = static_cast<ULONG_PTR>(NumWrite) * SlotBytes;
+	ProcessQueue.Lock(ELockType::Shared);
+
+	uint32 NextRecordCount = 0;
+	uint64 NextRecordBytes = 0;
+	for (auto Iterator = ProcessNotifyQueue.Begin(); Iterator != ProcessNotifyQueue.End(); ++Iterator)
+	{
+		Argus::Notify::FProcessNotifyInfo& Info(*Iterator);
+		const uint64 CommandLineBytes	= static_cast<uint64>(Info.CommandLine.Len()) * sizeof(FString<>::ElementType);
+		const uint64 ImageFileNameBytes = static_cast<uint64>(Info.ImageFileName.Len()) * sizeof(FString<>::ElementType);
+		const uint64 RecordHeaderBytes	= sizeof(Argus::DeviceControl::FProcessNotifyRecord);
+
+		const uint64 RawBytes	 = RecordHeaderBytes + CommandLineBytes + ImageFileNameBytes;
+		const uint64 RecordBytes = static_cast<uint64>(AlignUp(RawBytes, Argus::DeviceControl::FProcessNotifyRecord::RecordAlignment));
+
+		NextRecordCount += 1;
+		NextRecordBytes += RecordBytes;
+	}
+
+	ProcessQueue.Unlock(ELockType::Shared);
+
+	Argus::DeviceControl::FProcessNotifyHeader Header{};
+	Header.Version		   = Argus::DeviceControl::FProcessNotifyHeader::HeaderVersion;
+	Header.HeaderBytes	   = HeaderBytes;
+	Header.TotalCount	   = NumWrite;
+	Header.TotalBytes	   = NumWriteOffset;
+	Header.DropCount	   = ProcessQueue.GetDroppedCount();
+	Header.NextRecordCount = NextRecordCount;
+	Header.NextRecordBytes = NextRecordBytes;
+	RtlCopyMemory(Buffer, &Header, sizeof(Argus::DeviceControl::FProcessNotifyHeader));
+
+	Irp->IoStatus.Information = static_cast<ULONG_PTR>(NumWriteOffset);
 	return STATUS_SUCCESS;
 }
 

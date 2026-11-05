@@ -4,9 +4,13 @@
 #include "Kernel/Public/Containers/KrnlContainerForward.h"
 #include "Kernel/Public/Containers/KrnlSpscCircularQueue.h"
 #include "Kernel/Private/Notify/ProcessNotifyInfo.h"
+#include "Kernel/Private/Notify/LockType.h"
 
 class FProcessNotifyQueue
 {
+public:
+	typedef TSpscCircularQueue<EPoolType::Paged, Argus::Notify::FProcessNotifyInfo> TQueue;
+
 public:
 	explicit FProcessNotifyQueue(uint32 Tag) noexcept
 		: ProcessNotifyInfos(Tag)
@@ -23,74 +27,58 @@ public:
 	FProcessNotifyQueue(const FProcessNotifyQueue&) = delete;
 	FProcessNotifyQueue& operator=(const FProcessNotifyQueue&) = delete;
 
-	void OnProcessCreateNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo);
+public:
+	void OnProcessCreateNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo, const Argus::Notify::FProcessNotifyPolicy& InProcessPolicy);
+
 	void OnProcessExitNotify(PEPROCESS Process, HANDLE ProcessId);
 
-	bool TryPop(Argus::Notify::FProcessNotifyInfo& OutInfo) noexcept
+	bool TryPop(Argus::Notify::FProcessNotifyInfo& OutInfo) noexcept;
+
+	uint64 GetDroppedCount() noexcept;
+
+public:
+	NODISCARD FORCEINLINE TQueue& GetQueue() noexcept
 	{
-		KeEnterCriticalRegion();
-		ExAcquirePushLockExclusive(&this->ProcessNotifyInfosLock);
-
-		const bool bSuccess = this->ProcessNotifyInfos.TryPop(OutInfo);
-
-		ExReleasePushLockExclusive(&this->ProcessNotifyInfosLock);
-		KeLeaveCriticalRegion();
-
-		return bSuccess;
+		return this->ProcessNotifyInfos;
 	}
 
-	uint64 GetDroppedCount() noexcept
+	FORCEINLINE void Lock(ELockType LockType) noexcept
 	{
 		KeEnterCriticalRegion();
-		ExAcquirePushLockShared(&this->ProcessNotifyInfosLock);
-		const uint64 Count = this->DroppedProcessNotifyCount;
-		ExReleasePushLockShared(&this->ProcessNotifyInfosLock);
+
+		if (LockType == ELockType::Shared)
+		{
+			ExAcquirePushLockShared(&this->ProcessNotifyInfosLock);
+		}
+		else
+		{
+			ExAcquirePushLockExclusive(&this->ProcessNotifyInfosLock);
+		}
+	}
+
+	FORCEINLINE void Unlock(ELockType LockType) noexcept
+	{
+		if (LockType == ELockType::Shared)
+		{
+			ExReleasePushLockShared(&this->ProcessNotifyInfosLock);
+		}
+		else
+		{
+			ExReleasePushLockExclusive(&this->ProcessNotifyInfosLock);
+		}
+
 		KeLeaveCriticalRegion();
-		return Count;
 	}
 
 public:
-	//static constexpr uint16 ProcessNotifyMaxCommandLine = Argus::Notify::ProcessNotifyMaxCommandLineBytes;
 	static constexpr uint16 ProcessNotifyMaxInfos = 1024;
 	static constexpr uint16 TryMaxRestoreCount = 3;
 
 private:
-	bool TryRestore() noexcept
-	{
-		if (this->bInitSucceed.load(Atomic::EMemoryOrder::Acquire) != 0)
-		{
-			return true;
-		}
-
-		KeEnterCriticalRegion();
-		ExAcquirePushLockExclusive(&this->ProcessNotifyInfosLock);
-
-		if (this->bInitSucceed.load(Atomic::EMemoryOrder::Relaxed) == 0 &&
-			this->TryRestoreCount < TryMaxRestoreCount)
-		{
-			if (this->ProcessNotifyInfos.Initialize(ProcessNotifyMaxInfos) == EContainerStatus::Success)
-			{
-				this->bInitSucceed.store(1, Atomic::EMemoryOrder::Release);
-			}
-			else
-			{
-				++this->TryRestoreCount;
-			}
-		}
-
-		const bool bReady = this->bInitSucceed.load(Atomic::EMemoryOrder::Relaxed) != 0;
-		if (!bReady)
-		{
-			++this->DroppedProcessNotifyCount;
-		}
-
-		ExReleasePushLockExclusive(&this->ProcessNotifyInfosLock);
-		KeLeaveCriticalRegion();
-		return bReady;
-	}
+	bool TryRestore() noexcept;
 
 private:
-	TSpscCircularQueue<EPoolType::Paged, Argus::Notify::FProcessNotifyInfo> ProcessNotifyInfos;
+	TQueue ProcessNotifyInfos;
 	EX_PUSH_LOCK ProcessNotifyInfosLock;
 	uint64 DroppedProcessNotifyCount = 0;
 

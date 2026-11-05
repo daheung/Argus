@@ -10,12 +10,14 @@ static void HandleProcessNotifyRoutineFunc(PEPROCESS Process, HANDLE ProcessId, 
 	const bool bIsCreateNotify = CreateInfo != nullptr;
 	if (bIsCreateNotify)
 	{
+		Argus::Notify::FProcessNotifyPolicy ProcessPolicy;
+
 		// Inspect the creation request and apply policy changes first.
 		// FProcessCallback can reject creation through CreateInfo->CreationStatus.
-		GDriverContext->GetProcessCallback().OnProcessCreateNotify(Process, ProcessId, CreateInfo);
+		GDriverContext->GetProcessCallback().OnProcessCreateNotify(Process, ProcessId, CreateInfo, ProcessPolicy);
 	
 		// Forward the request to the Agent even if creation was rejected.
-		GDriverContext->GetProcessNotifyQueue().OnProcessCreateNotify(Process, ProcessId, CreateInfo);
+		GDriverContext->GetProcessNotifyQueue().OnProcessCreateNotify(Process, ProcessId, CreateInfo, ProcessPolicy);
 	}
 	else
 	{

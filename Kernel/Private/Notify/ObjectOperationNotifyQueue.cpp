@@ -123,9 +123,13 @@ namespace
 
 void FObjectOperationNotifyQueue::OnPreOperation(POB_PRE_OPERATION_INFORMATION Information, ACCESS_MASK DesiredAccessBeforePolicy) noexcept
 {
-	if (Information == nullptr)
+	if (Information == nullptr || Information->Parameters == nullptr)
 	{
-		// ??
+		return;
+	}
+	// Record only operations whose requested rights were reduced by an Argus rule.
+	if ((DesiredAccessBeforePolicy & ~GetDesiredAccess(*Information)) == 0)
+	{
 		return;
 	}
 	if (!this->TryRestore())

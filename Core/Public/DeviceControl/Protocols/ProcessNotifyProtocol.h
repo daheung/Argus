@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Public/Notify/ProcessNotifyTypes.h"
+#include "Core/Public/Policy/PolicyTypes.h"
 
 namespace Argus::DeviceControl
 {
@@ -12,12 +13,41 @@ namespace Argus::DeviceControl
 		NotFound
 	};
 
-	//struct FWCharBuffer {};
+	struct FProcessNotifyRP
+	{
+		uint32 Version;
+		uint32 CurRecordCount;
+		uint32 NextRecordCount;
+	};
 
-	// One output slot contains the record, command line, and executable base name.
+	struct FProcessNotifyHeader
+	{
+	public:
+		static constexpr uint32 HeaderVersion = 2u;
+
+	public:
+		uint32 Version;
+		uint64 HeaderBytes;
+		uint64 TotalCount;
+		uint64 TotalBytes;
+		uint64 DropCount;
+		uint32 NextRecordCount;
+		uint64 NextRecordBytes;
+		uint32 Reserved;
+	};
+
 	struct FProcessNotifyRecord
 	{
+	public:
+		static constexpr uint32 RecordAlignment = 4u;
+
+	public:
+		uint64 RecordHeaderBytes;
+
 		Argus::Notify::EProcessNotifyType NotifyType;
+		Argus::Policy::EPolicyRole PolicyRole;
+		Argus::Policy::EPolicyStatus PolicyStatus;
+
 		// UTC time in 100-nanosecond intervals since January 1, 1601. Zero means unavailable.
 		int64 CreatedAt;
 		int64 ExitedAt;
@@ -27,23 +57,13 @@ namespace Argus::DeviceControl
 		uint32 CreatingProcessId;
 		uint32 CreationStatus;
 		uint32 ExitCode;
-		uint32 CommandLineBytes;
-		uint32 ImageFileNameBytes;
-	};
+		
+		uint64 CommandLineBytes;
+		uint64 CommandLineOffset;
 
-	struct FProcessNotifySlot
-	{
-		FProcessNotifyRecord Record;
-		uint8 CommandLine[Argus::Notify::ProcessNotifyMaxCommandLineBytes];
-		WIDECHAR ImageFileName[Argus::Notify::ProcessNotifyMaxImageFileNameBytes / sizeof(WIDECHAR)];
-		//FWCharBuffer CommandLine;
-		//FWCharBuffer ImageFileName;
-	};
+		uint64 ImageFileNameBytes;
+		uint64 ImageFileNameOffset;
 
-	static_assert(sizeof(FProcessNotifyRecord) == 56,
-		"Process notify record layout must match in kernel and user mode");
-	static_assert(sizeof(FProcessNotifySlot) ==
-		sizeof(FProcessNotifyRecord) + Argus::Notify::ProcessNotifyMaxCommandLineBytes +
-		Argus::Notify::ProcessNotifyMaxImageFileNameBytes,
-		"Process notify slots must have a fixed wire size");
+		uint64 PaddingBytes;
+	};
 }

@@ -21,6 +21,9 @@ namespace
 	constexpr DWORD PollIntervalMs = 1000;
 	constexpr int32 SlotsPerRequest = 64;
 	constexpr int32 MaxBatchesPerPoll = 16;
+	constexpr size_t ProcessInitialBufferBytes = 64u * 1024u;
+	// The callback supplies at most two UNICODE_STRING payloads per record.
+	constexpr size_t ProcessMaxBufferBytes = 1024u * 1024u;
 	constexpr size_t RegistryInitialBufferBytes = 64u * 1024u;
 	// A record holds at most two UNICODE_STRING names, each with a 16-bit byte length.
 	constexpr size_t RegistryMaxBufferBytes = 256u * 1024u;
@@ -56,19 +59,27 @@ namespace
 		return ProtectedProcesses.find(ProcessId) != ProtectedProcesses.end() ? "protected" : "unknown";
 	}
 
-	bool MatchesProtectedExecutable(const Argus::DeviceControl::FProcessNotifySlot& Slot) noexcept
+	bool MatchesProtectedExecutable(const uint8* Buffer,
+		const Argus::DeviceControl::FProcessNotifyRecord& Record)
 	{
-		if (Slot.Record.NotifyType != Argus::Notify::EProcessNotifyType::Created)
+		if (Record.NotifyType != Argus::Notify::EProcessNotifyType::Create ||
+			static_cast<int32>(Record.CreationStatus) < 0)
 		{
 			return false;
 		}
-		const uint32 NameBytes = Slot.Record.ImageFileNameBytes;
-		if (NameBytes == 0 || NameBytes > sizeof(Slot.ImageFileName) || NameBytes % sizeof(WCHAR) != 0)
+		const size_t NameBytes = static_cast<size_t>(Record.ImageFileNameBytes);
+		if (NameBytes == 0)
 		{
 			return false;
 		}
 		constexpr int TargetNameChars = static_cast<int>(sizeof(ProtectedExecutableName) / sizeof(WCHAR) - 1);
-		return CompareStringOrdinal(Slot.ImageFileName, static_cast<int>(NameBytes / sizeof(WCHAR)),
+		if (NameBytes / sizeof(WCHAR) != TargetNameChars)
+		{
+			return false;
+		}
+		WCHAR ImageName[TargetNameChars]{};
+		std::memcpy(ImageName, Buffer + static_cast<size_t>(Record.ImageFileNameOffset), NameBytes);
+		return CompareStringOrdinal(ImageName, TargetNameChars,
 			ProtectedExecutableName, TargetNameChars, TRUE) == CSTR_EQUAL;
 	}
 
@@ -440,14 +451,13 @@ namespace
 
 	void LogObjectOperationRecord(const Argus::DeviceControl::FObjectOperationNotifyRecord& Record)
 	{
-		if (Record.HandleOwnerProcessId != 0 &&
-			Record.HandleOwnerProcessId == Record.TargetProcessId)
+		const uint32 RemovedAccess = Record.DesiredAccessBeforePolicy & ~Record.DesiredAccessAfterPolicy;
+		if (RemovedAccess == 0)
 		{
 			return;
 		}
 
 		const std::string PreTime = FormatTime(Record.PreOperationAt);
-		const uint32 RemovedAccess = Record.DesiredAccessBeforePolicy & ~Record.DesiredAccessAfterPolicy;
 		Log(stdout, Record.PostOperationAt, "AUDIT", "object.handle_operation",
 			"operation=%s target_type=%s requester_pid=%u requester_tid=%u owner_pid=%u "
 			"source_pid=%u target_pid=%u target_tid=%u pre=%s "
@@ -481,99 +491,169 @@ namespace
 			RegistryNameStatusName(Record.ValueNameStatus), Value.c_str(), Record.IsolationFlags);
 	}
 
-	std::string FormatImageName(const Argus::DeviceControl::FProcessNotifySlot& Slot)
+	bool ParseProcessBatch(const uint8* Buffer, size_t BytesReturned,
+		Argus::DeviceControl::FProcessNotifyHeader& Header,
+		std::vector<Argus::DeviceControl::FProcessNotifyRecord>& Records)
 	{
-		const uint32 ByteCount = Slot.Record.ImageFileNameBytes;
-		if (ByteCount == 0 || ByteCount > sizeof(Slot.ImageFileName) ||
-			ByteCount % sizeof(WCHAR) != 0)
+		using FHeader = Argus::DeviceControl::FProcessNotifyHeader;
+		using FRecord = Argus::DeviceControl::FProcessNotifyRecord;
+		if (BytesReturned < sizeof(FHeader))
 		{
-			return "<unavailable>";
+			return false;
+		}
+		std::memcpy(&Header, Buffer, sizeof(Header));
+		if (Header.Version != FHeader::HeaderVersion ||
+			Header.HeaderBytes != sizeof(FHeader) ||
+			Header.TotalBytes != BytesReturned || Header.Reserved != 0 ||
+			(Header.NextRecordCount == 0) != (Header.NextRecordBytes == 0) ||
+			Header.NextRecordBytes < static_cast<uint64>(Header.NextRecordCount) * sizeof(FRecord))
+		{
+			return false;
 		}
 
-		const int CharacterCount = static_cast<int>(ByteCount / sizeof(WCHAR));
-		const int Utf8Bytes = WideCharToMultiByte(CP_UTF8, 0, Slot.ImageFileName,
-			CharacterCount, nullptr, 0, nullptr, nullptr);
-		if (Utf8Bytes <= 0)
+		size_t Offset = sizeof(FHeader);
+		while (Offset < BytesReturned)
 		{
-			return "<invalid-image-text>";
+			const size_t Remaining = BytesReturned - Offset;
+			if (Remaining < sizeof(FRecord))
+			{
+				return false;
+			}
+			FRecord Record{};
+			std::memcpy(&Record, Buffer + Offset, sizeof(Record));
+			if (Record.RecordHeaderBytes != sizeof(FRecord) ||
+				Record.CommandLineBytes % sizeof(WCHAR) != 0 ||
+				Record.ImageFileNameBytes % sizeof(WCHAR) != 0 ||
+				Record.PaddingBytes >= FRecord::RecordAlignment)
+			{
+				return false;
+			}
+			const size_t PayloadBytes = Remaining - sizeof(FRecord);
+			if (Record.CommandLineBytes > PayloadBytes ||
+				Record.ImageFileNameBytes > PayloadBytes - static_cast<size_t>(Record.CommandLineBytes) ||
+				Record.PaddingBytes > PayloadBytes - static_cast<size_t>(Record.CommandLineBytes) -
+					static_cast<size_t>(Record.ImageFileNameBytes))
+			{
+				return false;
+			}
+			const size_t CommandOffset = Offset + sizeof(FRecord);
+			const size_t ImageOffset = CommandOffset + static_cast<size_t>(Record.CommandLineBytes);
+			const size_t PaddingOffset = ImageOffset + static_cast<size_t>(Record.ImageFileNameBytes);
+			const size_t RecordBytes = PaddingOffset + static_cast<size_t>(Record.PaddingBytes) - Offset;
+			if (Record.CommandLineOffset != CommandOffset ||
+				Record.ImageFileNameOffset != ImageOffset ||
+				RecordBytes % FRecord::RecordAlignment != 0)
+			{
+				return false;
+			}
+			for (size_t Index = 0; Index < Record.PaddingBytes; ++Index)
+			{
+				if (Buffer[PaddingOffset + Index] != 0)
+				{
+					return false;
+				}
+			}
+			Records.push_back(Record);
+			Offset += RecordBytes;
 		}
-		std::string Utf8(static_cast<size_t>(Utf8Bytes), '\0');
-		if (WideCharToMultiByte(CP_UTF8, 0, Slot.ImageFileName, CharacterCount,
-			Utf8.data(), Utf8Bytes, nullptr, nullptr) != Utf8Bytes)
-		{
-			return "<invalid-image-text>";
-		}
-		return EscapeForLog(Utf8);
+		return Records.size() == Header.TotalCount;
 	}
 
-	std::string FormatCommandLine(const Argus::DeviceControl::FProcessNotifySlot& Slot)
+	std::string FormatProcessText(const uint8* Buffer, uint64 Offset, uint64 ByteCount,
+		const char* EmptyText)
 	{
-		const uint32 ByteCount = Slot.Record.CommandLineBytes;
-		if (ByteCount > sizeof(Slot.CommandLine) || ByteCount % sizeof(WCHAR) != 0)
-		{
-			return "<invalid-command-length>";
-		}
 		if (ByteCount == 0)
 		{
-			return {};
+			return EmptyText;
 		}
-
-		WCHAR WideCommandLine[sizeof(Slot.CommandLine) / sizeof(WCHAR)]{};
-		std::memcpy(WideCommandLine, Slot.CommandLine, ByteCount);
-		const int CharacterCount = static_cast<int>(ByteCount / sizeof(WCHAR));
-		const int Utf8Bytes = WideCharToMultiByte(CP_UTF8, 0, WideCommandLine,
-			CharacterCount, nullptr, 0, nullptr, nullptr);
+		const size_t CharCount = static_cast<size_t>(ByteCount / sizeof(WCHAR));
+		std::wstring Wide(CharCount, L'\0');
+		std::memcpy(Wide.data(), Buffer + static_cast<size_t>(Offset), static_cast<size_t>(ByteCount));
+		const int CharacterCount = static_cast<int>(CharCount);
+		const int Utf8Bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+			Wide.data(), CharacterCount, nullptr, 0, nullptr, nullptr);
 		if (Utf8Bytes <= 0)
 		{
-			return "<invalid-command-text>";
+			return "<invalid-utf16>";
 		}
-
 		std::string Utf8(static_cast<size_t>(Utf8Bytes), '\0');
-		if (WideCharToMultiByte(CP_UTF8, 0, WideCommandLine, CharacterCount,
+		if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Wide.data(), CharacterCount,
 			Utf8.data(), Utf8Bytes, nullptr, nullptr) != Utf8Bytes)
 		{
-			return "<invalid-command-text>";
+			return "<invalid-utf16>";
 		}
 		return EscapeForLog(Utf8);
 	}
 
-	void LogProcessNotify(const Argus::DeviceControl::FProcessNotifySlot& Slot,
+	const char* ProcessPolicyRoleName(Argus::Policy::EPolicyRole Role) noexcept
+	{
+		switch (Role)
+		{
+		case Argus::Policy::EPolicyRole::None: return "none";
+		case Argus::Policy::EPolicyRole::AgentProcess: return "agent";
+		case Argus::Policy::EPolicyRole::IsolatedProcess: return "isolated";
+		case Argus::Policy::EPolicyRole::ProtectedProcess: return "protected";
+		default: return "unknown";
+		}
+	}
+
+	const char* ProcessPolicyStatusName(Argus::Policy::EPolicyStatus Status) noexcept
+	{
+		switch (Status)
+		{
+		case Argus::Policy::EPolicyStatus::AccessNone: return "none";
+		case Argus::Policy::EPolicyStatus::AccessPass: return "pass";
+		case Argus::Policy::EPolicyStatus::AccessAllowed: return "allowed";
+		case Argus::Policy::EPolicyStatus::AccessBlocked: return "blocked";
+		case Argus::Policy::EPolicyStatus::AccessReduced: return "reduced";
+		default: return "unknown";
+		}
+	}
+
+	void LogProcessNotify(const uint8* Buffer,
+		const Argus::DeviceControl::FProcessNotifyRecord& Record,
 		FProtectedProcessMap& ProtectedProcesses)
 	{
-		const auto& Record = Slot.Record;
 		switch (Record.NotifyType)
 		{
-		case Argus::Notify::EProcessNotifyType::Created:
+		case Argus::Notify::EProcessNotifyType::Create:
+		case Argus::Notify::EProcessNotifyType::Both:
+		{
 			// A missed exit notification must not make a reused PID look registered.
 			ProtectedProcesses.erase(Record.ProcessId);
-			break;
-		case Argus::Notify::EProcessNotifyType::CreationDenied:
-		{
-			const std::string CommandLine = FormatCommandLine(Slot);
-			Log(stdout, Record.CreatedAt, "BLOCK", "process.create_denied",
-				"pid=%u parent=%u creator_pid=%u creator_tid=%u creator_role=%s cause=unknown status=0x%08X command=\"%s\"",
+			const bool Blocked = Record.PolicyStatus == Argus::Policy::EPolicyStatus::AccessBlocked;
+			const bool Failed = static_cast<int32>(Record.CreationStatus) < 0;
+			const bool Both = Record.NotifyType == Argus::Notify::EProcessNotifyType::Both;
+			const std::string Image = FormatProcessText(Buffer, Record.ImageFileNameOffset,
+				Record.ImageFileNameBytes, "<unavailable>");
+			const std::string CommandLine = FormatProcessText(Buffer, Record.CommandLineOffset,
+				Record.CommandLineBytes, "");
+			const std::string ExitedAt = Both ? FormatTime(Record.ExitedAt) : "<unavailable>";
+			Log(stdout, Record.CreatedAt, Blocked ? "BLOCK" : "AUDIT",
+				Blocked ? "process.create_denied" : Failed ? "process.create_failed" :
+				Both ? "process.lifecycle" : "process.create",
+				"pid=%u parent=%u creator_pid=%u creator_tid=%u creator_role=%s "
+				"policy_role=%s policy_status=%s status=0x%08X image=\"%s\" command=\"%s\" "
+				"has_exit=%u exited=%s exit_code=0x%08X",
 				Record.ProcessId, Record.ParentProcessId,
 				Record.CreatingProcessId, Record.CreatingThreadId,
-				GetKnownProcessRole(Record.CreatingProcessId, ProtectedProcesses), Record.CreationStatus,
-				CommandLine.c_str());
+				GetKnownProcessRole(Record.CreatingProcessId, ProtectedProcesses),
+				ProcessPolicyRoleName(Record.PolicyRole), ProcessPolicyStatusName(Record.PolicyStatus),
+				Record.CreationStatus, Image.c_str(), CommandLine.c_str(),
+				Both ? 1u : 0u, ExitedAt.c_str(), Record.ExitCode);
 			break;
 		}
-		case Argus::Notify::EProcessNotifyType::CreationFailed:
+		case Argus::Notify::EProcessNotifyType::Exit:
 		{
-			const std::string CommandLine = FormatCommandLine(Slot);
-			Log(stdout, Record.CreatedAt, "AUDIT", "process.create_failed",
-				"pid=%u parent=%u creator_pid=%u creator_tid=%u creator_role=%s status=0x%08X command=\"%s\"",
-				Record.ProcessId, Record.ParentProcessId,
-				Record.CreatingProcessId, Record.CreatingThreadId,
-				GetKnownProcessRole(Record.CreatingProcessId, ProtectedProcesses), Record.CreationStatus,
-				CommandLine.c_str());
-			break;
-		}
-		case Argus::Notify::EProcessNotifyType::Exited:
-		{
+			Log(stdout, Record.ExitedAt, "AUDIT", "process.exit",
+				"pid=%u exit_code=0x%08X", Record.ProcessId, Record.ExitCode);
 			const auto It = ProtectedProcesses.find(Record.ProcessId);
 			if (It != ProtectedProcesses.end())
 			{
+				if (Record.CreatedAt != 0 && Record.CreatedAt != It->second.CreatedAt)
+				{
+					break;
+				}
 				const FTrackedProtectedProcess Tracked = It->second;
 				ProtectedProcesses.erase(It);
 				const std::string CreatedAt = FormatTime(Tracked.CreatedAt);
@@ -620,8 +700,8 @@ int main()
 	}
 
 	Log(stdout, 0, "INFO", "process.register", "role=agent pid=%lu", GetCurrentProcessId());
-	Argus::DeviceControl::FProcessNotifySlot Slots[SlotsPerRequest];
-	static_assert(sizeof(Slots) <= MAXDWORD, "IOCTL output size must fit in DWORD");
+	static_assert(ProcessMaxBufferBytes <= MAXDWORD, "Process IOCTL output size must fit in DWORD");
+	std::vector<uint8> ProcessBuffer(ProcessInitialBufferBytes);
 	Argus::DeviceControl::FThreadNotifyRecord ThreadRecords[SlotsPerRequest];
 	static_assert(sizeof(ThreadRecords) <= MAXDWORD, "IOCTL output size must fit in DWORD");
 	Argus::DeviceControl::FImageNotifySlot ImageSlots[SlotsPerRequest];
@@ -633,6 +713,8 @@ int main()
 	static_assert(ObjectBufferBytes <= MAXDWORD, "Object operation IOCTL output size must fit in DWORD");
 	std::vector<uint8> ObjectBuffer(ObjectBufferBytes);
 	FProtectedProcessMap ProtectedProcesses;
+	uint64 LastProcessDropCount = 0;
+	bool bHasProcessDropCount = false;
 	uint64 LastRegistryDropCount = 0;
 	bool bHasRegistryDropCount = false;
 	uint64 LastObjectDropCount = 0;
@@ -642,9 +724,15 @@ int main()
 	{
 		for (int32 Batch = 0; Batch < MaxBatchesPerPoll; ++Batch)
 		{
+			Argus::DeviceControl::FProcessNotifyRP Request{
+				Argus::DeviceControl::FProcessNotifyHeader::HeaderVersion,
+				static_cast<uint32>(SlotsPerRequest), static_cast<uint32>(SlotsPerRequest)
+			};
 			DWORD BytesReturned = 0;
 			if (!DeviceIoControl(Device, Argus::DeviceControl::IoctlCodeGetProcessNotify,
-				nullptr, 0, Slots, static_cast<DWORD>(sizeof(Slots)), &BytesReturned, nullptr))
+				&Request, static_cast<DWORD>(sizeof(Request)),
+				ProcessBuffer.data(), static_cast<DWORD>(ProcessBuffer.size()),
+				&BytesReturned, nullptr))
 			{
 				const DWORD Error = GetLastError();
 				if (Error == ERROR_NO_SYSTEM_RESOURCES)
@@ -656,8 +744,7 @@ int main()
 				CloseHandle(Device);
 				return 1;
 			}
-			if (BytesReturned > sizeof(Slots) ||
-				BytesReturned % sizeof(Argus::DeviceControl::FProcessNotifySlot) != 0)
+			if (BytesReturned > ProcessBuffer.size())
 			{
 				Log(stderr, 0, "ERROR", "ioctl.get_process_notify_failed",
 					"reason=invalid_byte_count bytes=%lu", BytesReturned);
@@ -665,14 +752,22 @@ int main()
 				return 1;
 			}
 
-			const size_t Count = BytesReturned / sizeof(Argus::DeviceControl::FProcessNotifySlot);
-			for (size_t Index = 0; Index < Count; ++Index)
+			Argus::DeviceControl::FProcessNotifyHeader Header{};
+			std::vector<Argus::DeviceControl::FProcessNotifyRecord> Records;
+			if (!ParseProcessBatch(ProcessBuffer.data(), BytesReturned, Header, Records))
 			{
-				LogProcessNotify(Slots[Index], ProtectedProcesses);
-				if (MatchesProtectedExecutable(Slots[Index]))
+				Log(stderr, 0, "ERROR", "ioctl.get_process_notify_failed",
+					"reason=invalid_payload bytes=%lu", BytesReturned);
+				CloseHandle(Device);
+				return 1;
+			}
+			for (const auto& Record : Records)
+			{
+				LogProcessNotify(ProcessBuffer.data(), Record, ProtectedProcesses);
+				if (MatchesProtectedExecutable(ProcessBuffer.data(), Record))
 				{
-					const auto& Record = Slots[Index].Record;
-					const std::string Image = FormatImageName(Slots[Index]);
+					const std::string Image = FormatProcessText(ProcessBuffer.data(),
+						Record.ImageFileNameOffset, Record.ImageFileNameBytes, "<unavailable>");
 					Log(stdout, Record.CreatedAt, "AUDIT", "process.detect",
 						"role=protected pid=%u parent=%u image=\"%s\"",
 						Record.ProcessId, Record.ParentProcessId, Image.c_str());
@@ -690,9 +785,46 @@ int main()
 					}
 				}
 			}
-			if (Count < SlotsPerRequest)
+			if (!bHasProcessDropCount)
+			{
+				if (Header.DropCount != 0)
+				{
+					Log(stderr, 0, "WARN", "process.drop", "total=%llu",
+						static_cast<unsigned long long>(Header.DropCount));
+				}
+				bHasProcessDropCount = true;
+			}
+			else if (Header.DropCount > LastProcessDropCount)
+			{
+				Log(stderr, 0, "WARN", "process.drop", "delta=%llu total=%llu",
+					static_cast<unsigned long long>(Header.DropCount - LastProcessDropCount),
+					static_cast<unsigned long long>(Header.DropCount));
+			}
+			else if (Header.DropCount < LastProcessDropCount)
+			{
+				Log(stderr, 0, "WARN", "process.drop_counter_reset",
+					"previous_total=%llu current_total=%llu",
+					static_cast<unsigned long long>(LastProcessDropCount),
+					static_cast<unsigned long long>(Header.DropCount));
+			}
+			LastProcessDropCount = Header.DropCount;
+			if (Header.NextRecordCount == 0)
 			{
 				break;
+			}
+			if (Records.empty())
+			{
+				if (ProcessBuffer.size() == ProcessMaxBufferBytes)
+				{
+					Log(stderr, 0, "ERROR", "ioctl.get_process_notify_failed",
+						"reason=record_exceeds_buffer buffer_bytes=%zu pending=%u",
+						ProcessBuffer.size(), Header.NextRecordCount);
+					CloseHandle(Device);
+					return 1;
+				}
+				const size_t DoubledSize = ProcessBuffer.size() * 2;
+				ProcessBuffer.resize(DoubledSize < ProcessMaxBufferBytes
+					? DoubledSize : ProcessMaxBufferBytes);
 			}
 		}
 		for (int32 Batch = 0; Batch < MaxBatchesPerPoll; ++Batch)
