@@ -1,3 +1,4 @@
+#include "Core/Public/Security/ArgusIdentity.h"
 #include "Kernel/Public/Misc/KernelDefines.h"
 #include "Kernel/Private/DriverContext.h"
 #include "Kernel/Private/DeviceControl/DeviceControl.h"
@@ -304,7 +305,11 @@ static NTSTATUS InitializeDriver(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Re
 
 	PDEVICE_OBJECT DeviceObject = nullptr;
 	UNICODE_STRING DeviceName = RTL_CONSTANT_STRING(L"\\Device\\Argus");
-	NTSTATUS Status = IoCreateDevice(DriverObject, 0, &DeviceName, FILE_DEVICE_UNKNOWN, 0, true, &DeviceObject);
+	//NTSTATUS Status = IoCreateDevice(DriverObject, 0, &DeviceName, FILE_DEVICE_UNKNOWN, 0, true, &DeviceObject);
+	NTSTATUS Status = IoCreateDeviceSecure(DriverObject, 0, &DeviceName,
+		FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, true,
+		&SDDL_DEVOBJ_SYS_ALL, &Argus::Identity::ControlDeviceClassGuid, &DeviceObject);
+
 	if (!NT_SUCCESS(Status))
 	{
 		CleanupDriver();

@@ -50,6 +50,7 @@ set_target_properties(ArgusKernel PROPERTIES
 target_link_libraries(ArgusKernel PRIVATE ArgusCompilerOptions
     "${ARGUS_WDK_LIB_DIR}/ntoskrnl.lib"
     "${ARGUS_WDK_LIB_DIR}/fltmgr.lib"
+    "${ARGUS_WDK_LIB_DIR}/Wdmsec.lib"
     "${ARGUS_WDK_LIB_DIR}/BufferOverflowK.lib"
 )
 target_include_directories(ArgusKernel PRIVATE

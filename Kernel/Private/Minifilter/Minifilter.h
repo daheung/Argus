@@ -1,7 +1,10 @@
 #pragma once
 
+#include "Core/Public/Policy/FilePolicyTypes.h"
 #include "Kernel/Public/Misc/KernelDefines.h"
-#include "Core/Public/Templates/Atomic.h"
+#include "Kernel/Public/Containers/KrnlArray.h"
+#include "Kernel/Public/Containers/KrnlContainerForward.h"
+#include "Kernel/Private/Minifilter/FilePolicyRegistry.h"
 
 enum class EFilterMode : uint32
 {
@@ -20,6 +23,9 @@ enum class EFilterState : uint32
 
 class FMinifilter
 {
+public:
+	typedef TArray<EPoolType::NonPaged, Argus::Policy::FFileObjectPolicyRuleDescriptor> FNonPFileObjectRules;
+
 public:
 	FMinifilter() noexcept
 	{
@@ -51,6 +57,8 @@ private:
 	PFLT_FILTER Filter = nullptr;
 	bool bStartAttempted = false;
 	KEVENT UnregisterComplete;
+	
+	FFileObjectPolicyRegistry FileObjectPolicyRegistry;
 
 	TKernelAtomicCounter<uint32> FilterMode{ static_cast<uint32>(EFilterMode::None) };
 	TKernelAtomicCounter<uint32> FilterState{ static_cast<uint32>(EFilterState::Unregistered) };

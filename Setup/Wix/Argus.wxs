@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Argus" Manufacturer="Argus" Version="$(ArgusVersion)"
+           UpgradeCode="{936C2A61-DB98-493A-A85B-53D1279622C8}"
+           Scope="perMachine" InstallerVersion="500">
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of Argus is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Argus">
+        <Component Id="InstallFolderSecurityComponent" Guid="{0DA09780-524D-4F13-A430-5AA33C1224D0}">
+          <CreateFolder>
+            <PermissionEx Id="ArgusInstallFolderAcl"
+                          Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)" />
+          </CreateFolder>
+          <RemoveFolder Id="RemoveArgusInstallFolder" On="uninstall" />
+        </Component>
+        <Component Id="AgentComponent" Guid="{B19C749C-5ED0-4A85-92E1-3F8916944CE5}">
+          <File Id="AgentFile" Source="$(BundleDir)\ArgusAgent.exe" KeyPath="yes">
+            <PermissionEx Id="ArgusAgentFileAcl"
+                          Sddl="D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;BU)" />
+          </File>
+          <ServiceInstall Id="ArgusAgentService" Name="ArgusAgent" DisplayName="Argus Agent"
+                          Description="Argus user-mode agent" Type="ownProcess"
+                          Start="auto" ErrorControl="normal"
+                          Arguments="--service">
+            <ServiceDependency Id="ArgusKernel" />
+            <PermissionEx Id="ArgusAgentServiceAcl"
+                          Sddl="D:P(A;;0xF01FF;;;SY)(A;;0xF01FF;;;BA)(A;;0x2008D;;;AU)" />
+          </ServiceInstall>
+          <ServiceControl Id="ArgusAgentControl" Name="ArgusAgent"
+                          Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+        </Component>
+        <Component Id="SetupComponent" Guid="{A1AEDCA7-79D8-4FF7-AAB2-065B4FBA19F1}">
+          <File Id="SetupFile" Source="$(BundleDir)\ArgusSetup.exe" KeyPath="yes">
+            <PermissionEx Id="ArgusSetupFileAcl"
+                          Sddl="D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;BU)" />
+          </File>
+        </Component>
+        <Directory Id="DRIVERFOLDER" Name="Driver">
+          <Component Id="DriverInfComponent" Guid="{1307EBB8-DAA0-4BBF-A8FA-E9506981F1A2}">
+            <CreateFolder>
+              <PermissionEx Id="ArgusDriverFolderAcl"
+                            Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)" />
+            </CreateFolder>
+            <RemoveFolder Id="RemoveArgusDriverFolder" On="uninstall" />
+            <File Id="DriverInfFile" Source="$(BundleDir)\Driver\ArgusKernel.inf" KeyPath="yes">
+              <PermissionEx Id="ArgusDriverInfAcl"
+                            Sddl="D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;BU)" />
+            </File>
+          </Component>
+          <Component Id="DriverSysComponent" Guid="{631879A9-0744-4698-840B-3BC9946EA57A}">
+            <File Id="DriverSysFile" Source="$(BundleDir)\Driver\ArgusKernel.sys" KeyPath="yes">
+              <PermissionEx Id="ArgusDriverSysAcl"
+                            Sddl="D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;BU)" />
+            </File>
+          </Component>
+          <Component Id="DriverCatComponent" Guid="{5FEC380B-641E-4511-919D-EBBCF1249ECD}">
+            <File Id="DriverCatFile" Source="$(BundleDir)\Driver\arguskernel.cat"
+                  Name="ArgusKernel.cat" KeyPath="yes">
+              <PermissionEx Id="ArgusDriverCatAcl"
+                            Sddl="D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;BU)" />
+            </File>
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="ArgusFeature" Title="Argus" Level="1" AllowAdvertise="no">
+      <ComponentRef Id="InstallFolderSecurityComponent" />
+      <ComponentRef Id="AgentComponent" />
+      <ComponentRef Id="SetupComponent" />
+      <ComponentRef Id="DriverInfComponent" />
+      <ComponentRef Id="DriverSysComponent" />
+      <ComponentRef Id="DriverCatComponent" />
+    </Feature>
+
+    <!-- MSI owns files, install-path ACLs, and the service DACL. The helper configures the service SID, log ACL, and INF driver. -->
+    <CustomAction Id="RollbackDriverInstall" FileRef="SetupFile"
+                  ExeCommand="msi-driver-uninstall" Execute="rollback"
+                  Impersonate="no" Return="ignore" />
+    <CustomAction Id="InstallDriver" FileRef="SetupFile"
+                  ExeCommand="msi-driver-install" Execute="deferred"
+                  Impersonate="no" Return="check" />
+    <CustomAction Id="RollbackDriverUninstall" FileRef="SetupFile"
+                  ExeCommand="msi-driver-install" Execute="rollback"
+                  Impersonate="no" Return="ignore" />
+    <CustomAction Id="UninstallDriver" FileRef="SetupFile"
+                  ExeCommand="msi-driver-uninstall" Execute="deferred"
+                  Impersonate="no" Return="check" />
+    <CustomAction Id="CleanInstallFolder" FileRef="SetupFile"
+                  ExeCommand="msi-clean-install-folder" Execute="deferred"
+                  Impersonate="no" Return="check" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RollbackDriverUninstall" After="StopServices" Condition="REMOVE=&quot;ALL&quot;" />
+      <Custom Action="UninstallDriver" After="RollbackDriverUninstall" Condition="REMOVE=&quot;ALL&quot;" />
+      <Custom Action="CleanInstallFolder" After="UninstallDriver"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="RollbackDriverInstall" After="InstallServices" Condition="NOT Installed" />
+      <Custom Action="InstallDriver" After="RollbackDriverInstall" Condition="NOT Installed" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

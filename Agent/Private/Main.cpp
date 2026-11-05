@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <ShlObj.h>
 
 #include "Core/Public/DeviceControl/DeviceControlDefines.h"
 #include "Core/Public/DeviceControl/Protocols/ImageNotifyProtorol.h"
@@ -11,7 +12,9 @@
 
 #include <cstdio>
 #include <cstdarg>
+#include <atomic>
 #include <cstring>
+#include <share.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -28,9 +31,31 @@ namespace
 	// A record holds at most two UNICODE_STRING names, each with a 16-bit byte length.
 	constexpr size_t RegistryMaxBufferBytes = 256u * 1024u;
 	constexpr uint32 AgentMajorVersion = 0;
-	constexpr uint32 AgentMinorVersion = 1;
+	constexpr uint32 AgentMinorVersion = 4;
 	constexpr uint32 AgentPatchVersion = 1;
 	constexpr WCHAR ProtectedExecutableName[] = L"maruexe.local.exe";
+	constexpr WCHAR AgentServiceName[] = L"ArgusAgent";
+	std::atomic<HANDLE> GStopEvent{ nullptr };
+	SERVICE_STATUS_HANDLE GServiceStatusHandle = nullptr;
+	FILE* GServiceLog = nullptr;
+
+	bool IsStopRequested(HANDLE StopEvent) noexcept
+	{
+		return StopEvent != nullptr && WaitForSingleObject(StopEvent, 0) == WAIT_OBJECT_0;
+	}
+
+	void ReportServiceStatus(DWORD State, DWORD Error = NO_ERROR) noexcept
+	{
+		SERVICE_STATUS Status{};
+		Status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+		Status.dwCurrentState = State;
+		Status.dwControlsAccepted = State == SERVICE_RUNNING
+			? SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN : 0;
+		Status.dwWin32ExitCode = Error;
+		Status.dwServiceSpecificExitCode = Error == ERROR_SERVICE_SPECIFIC_ERROR ? 1 : 0;
+		Status.dwWaitHint = State == SERVICE_START_PENDING || State == SERVICE_STOP_PENDING ? 10000 : 0;
+		SetServiceStatus(GServiceStatusHandle, &Status);
+	}
 
 	struct FTrackedProtectedProcess
 	{
@@ -166,13 +191,14 @@ namespace
 	void Log(FILE* Stream, int64 TimeTicks, const char* Level, const char* Event,
 		const char* Format, ...)
 	{
+		FILE* Output = GServiceLog != nullptr ? GServiceLog : Stream;
 		const std::string Time = FormatTime(TimeTicks);
-		std::fprintf(Stream, "[Argus] %s %s agent %s ", Time.c_str(), Level, Event);
+		std::fprintf(Output, "[Argus] %s %s agent %s ", Time.c_str(), Level, Event);
 		va_list Args;
 		va_start(Args, Format);
-		std::vfprintf(Stream, Format, Args);
+		std::vfprintf(Output, Format, Args);
 		va_end(Args);
-		std::fputc('\n', Stream);
+		std::fputc('\n', Output);
 	}
 
 	std::string EscapeForLog(const std::string& Text)
@@ -671,11 +697,8 @@ namespace
 	}
 }
 
-int main()
+static int RunAgent(HANDLE StopEvent)
 {
-	SetConsoleOutputCP(CP_UTF8);
-	std::setvbuf(stdout, nullptr, _IONBF, 0);
-
 	HANDLE Device = CreateFileW(LR"(\\.\Argus)", GENERIC_READ, 0, nullptr,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (Device == INVALID_HANDLE_VALUE)
@@ -700,6 +723,10 @@ int main()
 	}
 
 	Log(stdout, 0, "INFO", "process.register", "role=agent pid=%lu", GetCurrentProcessId());
+	if (GServiceStatusHandle != nullptr)
+	{
+		ReportServiceStatus(SERVICE_RUNNING);
+	}
 	static_assert(ProcessMaxBufferBytes <= MAXDWORD, "Process IOCTL output size must fit in DWORD");
 	std::vector<uint8> ProcessBuffer(ProcessInitialBufferBytes);
 	Argus::DeviceControl::FThreadNotifyRecord ThreadRecords[SlotsPerRequest];
@@ -720,9 +747,9 @@ int main()
 	uint64 LastObjectDropCount = 0;
 	bool bHasObjectDropCount = false;
 
-	for (;;)
+	while (!IsStopRequested(StopEvent))
 	{
-		for (int32 Batch = 0; Batch < MaxBatchesPerPoll; ++Batch)
+		for (int32 Batch = 0; Batch < MaxBatchesPerPoll && !IsStopRequested(StopEvent); ++Batch)
 		{
 			Argus::DeviceControl::FProcessNotifyRP Request{
 				Argus::DeviceControl::FProcessNotifyHeader::HeaderVersion,
@@ -827,7 +854,7 @@ int main()
 					? DoubledSize : ProcessMaxBufferBytes);
 			}
 		}
-		for (int32 Batch = 0; Batch < MaxBatchesPerPoll; ++Batch)
+		for (int32 Batch = 0; Batch < MaxBatchesPerPoll && !IsStopRequested(StopEvent); ++Batch)
 		{
 			DWORD BytesReturned = 0;
 			if (!DeviceIoControl(Device, Argus::DeviceControl::IoctlCodeGetThreadNotify,
@@ -858,7 +885,7 @@ int main()
 				break;
 			}
 		}
-		for (int32 Batch = 0; Batch < MaxBatchesPerPoll; ++Batch)
+		for (int32 Batch = 0; Batch < MaxBatchesPerPoll && !IsStopRequested(StopEvent); ++Batch)
 		{
 			DWORD BytesReturned = 0;
 			if (!DeviceIoControl(Device, Argus::DeviceControl::IoctlCodeGetImageNotify,
@@ -889,7 +916,7 @@ int main()
 				break;
 			}
 		}
-		for (int32 Batch = 0; Batch < MaxBatchesPerPoll; ++Batch)
+		for (int32 Batch = 0; Batch < MaxBatchesPerPoll && !IsStopRequested(StopEvent); ++Batch)
 		{
 			DWORD BytesReturned = 0;
 			if (!DeviceIoControl(Device, Argus::DeviceControl::IoctlCodeGetRegistryNotify,
@@ -971,7 +998,7 @@ int main()
 					? DoubledSize : RegistryMaxBufferBytes);
 			}
 		}
-		for (int32 Batch = 0; Batch < MaxBatchesPerPoll; ++Batch)
+		for (int32 Batch = 0; Batch < MaxBatchesPerPoll && !IsStopRequested(StopEvent); ++Batch)
 		{
 			Argus::DeviceControl::FObjectOperationRP Request{
 				Argus::DeviceControl::FObjectOperationNotifyHeader::HeaderVersion,
@@ -1043,6 +1070,106 @@ int main()
 				break;
 			}
 		}
-		Sleep(PollIntervalMs);
+		if (StopEvent != nullptr)
+		{
+			WaitForSingleObject(StopEvent, PollIntervalMs);
+		}
+		else
+		{
+			Sleep(PollIntervalMs);
+		}
 	}
+	Log(stdout, 0, "INFO", "service.stop", "role=agent pid=%lu", GetCurrentProcessId());
+	CloseHandle(Device);
+	return 0;
+}
+
+static bool OpenServiceLog()
+{
+	PWSTR ProgramData = nullptr;
+	if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramData, KF_FLAG_DEFAULT, nullptr, &ProgramData)))
+	{
+		return false;
+	}
+	std::wstring Path(ProgramData);
+	CoTaskMemFree(ProgramData);
+	Path += L"\\Argus\\Agent.log";
+	GServiceLog = _wfsopen(Path.c_str(), L"ab", _SH_DENYWR);
+	if (GServiceLog == nullptr)
+	{
+		return false;
+	}
+	std::setvbuf(GServiceLog, nullptr, _IONBF, 0);
+	return true;
+}
+
+static DWORD WINAPI HandleServiceControl(DWORD Control, DWORD, void*, void*)
+{
+	if (Control == SERVICE_CONTROL_STOP || Control == SERVICE_CONTROL_SHUTDOWN)
+	{
+		const HANDLE StopEvent = GStopEvent.load();
+		if (StopEvent != nullptr)
+		{
+			SetEvent(StopEvent);
+		}
+		return NO_ERROR;
+	}
+	return Control == SERVICE_CONTROL_INTERROGATE ? NO_ERROR : ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+static void WINAPI ServiceMain(DWORD, LPWSTR*)
+{
+	GServiceStatusHandle = RegisterServiceCtrlHandlerExW(AgentServiceName, HandleServiceControl, nullptr);
+	if (GServiceStatusHandle == nullptr)
+	{
+		return;
+	}
+	ReportServiceStatus(SERVICE_START_PENDING);
+	if (!OpenServiceLog())
+	{
+		OutputDebugStringW(L"ArgusAgent: cannot open ProgramData\\Argus\\Agent.log\n");
+		ReportServiceStatus(SERVICE_STOPPED, ERROR_OPEN_FAILED);
+		return;
+	}
+	const HANDLE StopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+	if (StopEvent == nullptr)
+	{
+		Log(stderr, 0, "ERROR", "service.start_failed", "reason=stop_event win32=%lu", GetLastError());
+		ReportServiceStatus(SERVICE_STOPPED, ERROR_NOT_ENOUGH_MEMORY);
+		std::fclose(GServiceLog);
+		GServiceLog = nullptr;
+		return;
+	}
+	GStopEvent.store(StopEvent);
+
+	const int Result = RunAgent(StopEvent);
+	if (Result == 0)
+	{
+		ReportServiceStatus(SERVICE_STOP_PENDING);
+	}
+	ReportServiceStatus(SERVICE_STOPPED, Result == 0 ? NO_ERROR : ERROR_SERVICE_SPECIFIC_ERROR);
+	GStopEvent.store(nullptr);
+	CloseHandle(StopEvent);
+	std::fclose(GServiceLog);
+	GServiceLog = nullptr;
+}
+
+int main(int Argc, char* Argv[])
+{
+	if (Argc == 2 && std::strcmp(Argv[1], "--service") == 0)
+	{
+		SERVICE_TABLE_ENTRYW Services[] = {
+			{ const_cast<LPWSTR>(AgentServiceName), ServiceMain },
+			{ nullptr, nullptr }
+		};
+		return StartServiceCtrlDispatcherW(Services) ? 0 : 1;
+	}
+	if (Argc != 1)
+	{
+		std::fprintf(stderr, "Usage: ArgusAgent.exe [--service]\n");
+		return 1;
+	}
+	SetConsoleOutputCP(CP_UTF8);
+	std::setvbuf(stdout, nullptr, _IONBF, 0);
+	return RunAgent(nullptr);
 }

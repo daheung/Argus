@@ -25,6 +25,7 @@ public:
 	FAgentState& operator=(const FAgentState&) = delete;
 
 	NTSTATUS RegisterAgentProcess(FArgusAgentProcess InAgentProcess) noexcept;
+
 	void OnProcessExit(PEPROCESS Process) noexcept;
 	bool IsAgentProcess(PEPROCESS Process) noexcept;
 
@@ -34,7 +35,12 @@ public:
 	}
 
 private:
-	NTSTATUS RegisterAgentProcessCheck(const FArgusAgentProcess& InAgentProcess) noexcept;
+	NTSTATUS RegisterAgentProcessCheck(const FArgusAgentProcess& InAgentProcess) const noexcept;
+
+	NTSTATUS RegisterAgentProcessCheckName(const FArgusAgentProcess& InAgentProcess) const noexcept;
+
+	NTSTATUS RegisterAgentProcessCheckVerify(const FArgusAgentProcess& InAgentProcess) const noexcept;
+
 	void ClearAgentProcess() noexcept;
 
 	FArgusAgentProcess AgentProcess;

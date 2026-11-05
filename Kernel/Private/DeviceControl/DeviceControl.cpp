@@ -84,6 +84,16 @@ NTSTATUS DeviceControlGetProcessNotify(FDriverContext* Context, PDEVICE_OBJECT D
 		return STATUS_DEVICE_NOT_READY;
 	}
 
+	PEPROCESS Process = IoGetRequestorProcess(Irp);
+	if (Process == nullptr)
+	{
+		return STATUS_ACCESS_DENIED;
+	}
+	if (!Context->GetAgentState().IsAgentProcess(Process))
+	{
+		return STATUS_ACCESS_DENIED;
+	}
+
 	const auto* IrpSp = IoGetCurrentIrpStackLocation(Irp);
 	const uint32 BufferLength = IrpSp->Parameters.DeviceIoControl.OutputBufferLength;
 	const uint32 InputBufferLength = IrpSp->Parameters.DeviceIoControl.InputBufferLength;
@@ -248,6 +258,16 @@ NTSTATUS DeviceControlGetThreadNotify(FDriverContext* Context, PDEVICE_OBJECT De
 		return STATUS_DEVICE_NOT_READY;
 	}
 
+	PEPROCESS Process = IoGetRequestorProcess(Irp);
+	if (Process == nullptr)
+	{
+		return STATUS_ACCESS_DENIED;
+	}
+	if (!Context->GetAgentState().IsAgentProcess(Process))
+	{
+		return STATUS_ACCESS_DENIED;
+	}
+
 	const auto* IrpSp = IoGetCurrentIrpStackLocation(Irp);
 	const uint32 BufferLength = IrpSp->Parameters.DeviceIoControl.OutputBufferLength;
 
@@ -303,6 +323,16 @@ NTSTATUS DeviceControlGetImageNotify(FDriverContext* Context, PDEVICE_OBJECT Dev
 	if (Context == nullptr)
 	{
 		return STATUS_DEVICE_NOT_READY;
+	}
+
+	PEPROCESS Process = IoGetRequestorProcess(Irp);
+	if (Process == nullptr)
+	{
+		return STATUS_ACCESS_DENIED;
+	}
+	if (!Context->GetAgentState().IsAgentProcess(Process))
+	{
+		return STATUS_ACCESS_DENIED;
 	}
 
 	const auto* IrpSp = IoGetCurrentIrpStackLocation(Irp);
@@ -373,6 +403,16 @@ NTSTATUS DeviceControlGetRegistryNotify(FDriverContext* Context, PDEVICE_OBJECT 
 	if (Context == nullptr)
 	{
 		return STATUS_DEVICE_NOT_READY;
+	}
+
+	PEPROCESS Process = IoGetRequestorProcess(Irp);
+	if (Process == nullptr)
+	{
+		return STATUS_ACCESS_DENIED;
+	}
+	if (!Context->GetAgentState().IsAgentProcess(Process))
+	{
+		return STATUS_ACCESS_DENIED;
 	}
 
 	const auto* IrpSp = IoGetCurrentIrpStackLocation(Irp);
@@ -519,6 +559,16 @@ NTSTATUS DeviceControlGetObjectOperationNotify(FDriverContext* Context, PDEVICE_
 	if (Context == nullptr)
 	{
 		return STATUS_DEVICE_NOT_READY;
+	}
+
+	PEPROCESS Process = IoGetRequestorProcess(Irp);
+	if (Process == nullptr)
+	{
+		return STATUS_ACCESS_DENIED;
+	}
+	if (!Context->GetAgentState().IsAgentProcess(Process))
+	{
+		return STATUS_ACCESS_DENIED;
 	}
 
 	const auto* IrpSp = IoGetCurrentIrpStackLocation(Irp);
@@ -698,10 +748,6 @@ NTSTATUS DeviceControlRegisterProcess(FDriverContext* Context, PDEVICE_OBJECT De
 	Irp->IoStatus.Information = 0;
 
 	if (Context == nullptr)
-	{
-		return STATUS_DEVICE_NOT_READY;
-	}
-	if (!Context->GetAgentState().IsValidAgent())
 	{
 		return STATUS_DEVICE_NOT_READY;
 	}
