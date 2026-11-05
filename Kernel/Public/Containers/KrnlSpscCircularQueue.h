@@ -6,13 +6,6 @@
 #include "Core/Public/Memory/Memory.h"
 #include "Core/Public/Templates/Atomic.h"
 
-
-//template <typename ContinaerType>
-//class TContainerIterator
-//{
-//
-//};
-
 /**
  * Fixed-capacity single-producer, single-consumer queue.
  *
@@ -412,7 +405,7 @@ public:
 	FORCEINLINE		  ElementType& operator[](SizeType Index)	    noexcept { return At(Index); }
 	FORCEINLINE const ElementType& operator[](SizeType Index) const noexcept { return At(Index); }
 
-	NODISCARD FORCEINLINE ElementType& At(SizeType Index) noexcept
+	FORCEINLINE ElementType& At(SizeType Index) noexcept
 	{
 		CORE_CHECK(QueueMax != 0);
 		CORE_CHECK(0 <= Index && Index < Num());
@@ -422,7 +415,7 @@ public:
 		return this->GetElements()[PhysicalIndex];
 	}
 
-	NODISCARD FORCEINLINE const ElementType& At(SizeType Index) const noexcept
+	FORCEINLINE const ElementType& At(SizeType Index) const noexcept
 	{
 		CORE_CHECK(QueueMax != 0);
 		CORE_CHECK(0 <= Index && Index < Num());
@@ -450,14 +443,50 @@ public:
 		return true;
 	}
 
-	NODISCARD FORCEINLINE ElementType& PeekFront() noexcept 
+	FORCEINLINE ElementType& PeekFront() noexcept
 	{ 
 		return this->At(0);
 	}
 
-	NODISCARD FORCEINLINE const ElementType& PeekFront() const noexcept 
+	FORCEINLINE const ElementType& PeekFront() const noexcept
 	{ 
 		return this->At(0);
+	}
+
+public:
+	FORCEINLINE bool Find(const ElementType& Element, SizeType& Index) const noexcept
+	{
+		Index = this->Find(Element);
+		return Index != INDEX_NONE;
+	}
+
+	FORCEINLINE SizeType Find(const ElementType& Element) const noexcept
+	{
+		const SizeType Count = Num();
+		for (SizeType Index = 0; Index < Count; ++Index)
+		{
+			if (Element == At(Index))
+			{
+				return Index;
+			}
+		}
+
+		return INDEX_NONE;
+	}
+
+	template <typename Predicate>
+	FORCEINLINE SizeType FindIndexByPredicate(Predicate Pred) const noexcept
+	{
+		const SizeType Count = Num();
+		for (SizeType Index = 0; Index < Count; ++Index)
+		{
+			if (::Invoke(Pred, At(Index)))
+			{
+				return Index;
+			}
+		}
+
+		return INDEX_NONE;
 	}
 
 private:
@@ -469,12 +498,12 @@ private:
 
 	FORCEINLINE ElementType* GetElements() noexcept
 	{
-		return static_cast<ElementType*>(QueueAllocator.GetAllocation());
+		return QueueAllocator.GetAllocation();
 	}
 
 	FORCEINLINE const ElementType* GetElements() const noexcept
 	{
-		return static_cast<ElementType*>(QueueAllocator.GetAllocation());
+		return QueueAllocator.GetAllocation();
 	}
 
 public:

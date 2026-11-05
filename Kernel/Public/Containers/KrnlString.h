@@ -319,11 +319,28 @@ public:
 		CORE_CHECK(Data.Slack() >= 0);
 	}
 
+	/**
+	 * @brief Clears the string without storing a null terminator.
+	 *
+	 * GetCharArray().Num() and Len() become zero. The current allocation is
+	 * retained without reallocation, but operator*() still returns an empty
+	 * null-terminated string.
+	 */
 	FORCEINLINE EContainerStatus Empty() noexcept
 	{
 		return Data.Empty(0);
 	}
 
+	/**
+	 * @brief Clears the string and reserves space for future characters.
+	 *
+	 * On success, GetCharArray().Num() and Len() are zero: reserved space for
+	 * a future null terminator does not mean one is stored after clearing.
+	 * operator*() still returns an empty null-terminated string.
+	 * A nonzero Slack may resize or reallocate the underlying array; zero
+	 * retains its current allocation.
+	 * @param Slack Requested character capacity, excluding the future null terminator.
+	 */
 	FORCEINLINE EContainerStatus Empty(int32 Slack) noexcept
 	{
 		return Data.Empty(Slack ? Slack + 1 : 0);
@@ -354,11 +371,19 @@ public:
 		return Data.Num() ? Data.GetData() : L"";
 	}
 
+	/**
+	 * @brief Returns the underlying array of WIDECHAR elements.
+	 *
+	 * GetCharArray().Num() includes the trailing null terminator when it is
+	 * nonzero. A default-constructed or emptied string may have an
+	 * array Num() of zero, while Len() still returns zero.
+	 */
 	NODISCARD FORCEINLINE DataType& GetCharArray()
 	{
 		return Data;
 	}
 
+	/** @overload */
 	NODISCARD FORCEINLINE const DataType& GetCharArray() const
 	{
 		return Data;
@@ -1012,6 +1037,13 @@ public:
 		return Stricmp(Lhs, **Rhs) != 0;
 	}
 
+	/**
+	 * @brief Returns the stored WIDECHAR count, excluding the trailing null.
+	 *
+	 * Unlike GetCharArray().Num(), this count excludes the trailing null
+	 * terminator. Both a default-constructed string and an empty initialized
+	 * string have Len() == 0.
+	 */
 	NODISCARD FORCEINLINE int32 Len() const
 	{
 		return Data.Num() ? Data.Num() - 1 : 0;
@@ -1409,6 +1441,7 @@ namespace Argus::String
 	{
 		return String.GetCharArray().GetData();
 	}
+	/** @brief Returns String.Len(), excluding the trailing null terminator. */
 	template <EPoolType PoolType>
 	NODISCARD FORCEINLINE int32 GetNum(const FKrnlString<PoolType>& String)
 	{
