@@ -344,13 +344,14 @@ static NTSTATUS InitializeDriver(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Re
 
 	// File filtering is optional: a registration failure leaves the other
 	// Argus callbacks and the control device available with mode None.
-	Status = GDriverContext->GetMinifilter().Start(DriverObject);
+	Status = GDriverContext->GetMinifilter().InitStart(DriverObject);
 	if (!NT_SUCCESS(Status))
 	{
 		Argus::KernelLogging::Write(DPFLTR_WARNING_LEVEL, "WARN", "minifilter.start_failed",
 			"status=0x%08X mode=none\n", static_cast<ULONG>(Status));
 	}
 
+	GDriverContext->GetMinifilter().SetFilterMode(EFilterMode::Passive);
 	return STATUS_SUCCESS;
 }
 

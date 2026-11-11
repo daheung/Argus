@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.23)
 
-project(Argus VERSION 0.4.1 LANGUAGES CXX)
+project(Argus VERSION 1.0.3 LANGUAGES CXX)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "CMake")

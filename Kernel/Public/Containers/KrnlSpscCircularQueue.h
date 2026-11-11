@@ -2,6 +2,7 @@
 
 #include "Kernel/Public/Containers/KrnlContainerAllocator.h"
 #include "Kernel/Public/Containers/KrnlContainerStatus.h"
+#include "Kernel/Public/Containers/KrnlContainerForward.h"
 #include "Kernel/Public/Containers/KrnlArray.h"
 #include "Core/Public/Memory/Memory.h"
 #include "Core/Public/Templates/Atomic.h"
@@ -358,6 +359,12 @@ public:
 		DestructItem(Slot);
 		TailIndex.store(NextIndex(Tail), Atomic::EMemoryOrder::Release);
 		return true;
+	}
+
+	template <typename Predicate>
+	FORCEINLINE SizeType TryPopByPredicate(Predicate&& Pred, TArray<PoolType, ElementType>& OutArray) noexcept
+	{
+		return 0;
 	}
 
 	NODISCARD FORCEINLINE bool IsEmpty() const noexcept

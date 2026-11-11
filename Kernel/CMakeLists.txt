@@ -27,6 +27,7 @@ add_library(ArgusKernel MODULE
     ${ARGUS_KERNEL_CORE_SHARED_SOURCES}
     ${ARGUS_KERNEL_SOURCES}
     ${ARGUS_KERNEL_FILES}
+    "${CMAKE_CURRENT_SOURCE_DIR}/ArgusKernel.natvis"
 )
 source_group(
     TREE "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -41,6 +42,7 @@ source_group(
 set_target_properties(ArgusKernel PROPERTIES
     PREFIX ""
     SUFFIX ".sys"
+    MSVC_RUNTIME_LIBRARY "MultiThreaded"
     VS_PLATFORM_TOOLSET "WindowsKernelModeDriver10.0"
     VS_GLOBAL_DriverType "WDM"
     VS_GLOBAL_SignMode "Off"
@@ -52,6 +54,8 @@ target_link_libraries(ArgusKernel PRIVATE ArgusCompilerOptions
     "${ARGUS_WDK_LIB_DIR}/fltmgr.lib"
     "${ARGUS_WDK_LIB_DIR}/Wdmsec.lib"
     "${ARGUS_WDK_LIB_DIR}/BufferOverflowK.lib"
+    # TODO: Remove this when the shared Core character helpers no longer require CRT functions.
+    "${ARGUS_WDK_LIB_DIR}/libcntpr.lib"
 )
 target_include_directories(ArgusKernel PRIVATE
     "${PROJECT_SOURCE_DIR}"
@@ -102,3 +106,4 @@ add_custom_target(ArgusKernelPackage ALL
     DEPENDS ArgusKernel
     VERBATIM
 )
+set_target_properties(ArgusKernelPackage PROPERTIES FOLDER "Packaging")

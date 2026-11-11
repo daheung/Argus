@@ -1,37 +1,47 @@
-
 <?xml version="1.0" encoding="utf-8"?>
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
-
+  <!-- TArray is an alias of TKrnlArray, so these rules cover both names. -->
   <Type Name="TKrnlArray&lt;*,*,*&gt;">
-
-    <DisplayString Condition="ArrayNum &lt; 0 || ArrayMax &lt; 0 || ArrayNum &gt; ArrayMax">
-      Invalid (Num={ArrayNum}, Max={ArrayMax})
-    </DisplayString>
-
-    <DisplayString Condition="ArrayNum == 0">
-      Empty, Max={ArrayMax}
-    </DisplayString>
-
-    <DisplayString>
-      Num={ArrayNum}, Max={ArrayMax}
-    </DisplayString>
-
+    <DisplayString Condition="ArrayNum &lt; 0 || ArrayMax &lt; 0 || ArrayNum &gt; ArrayMax">Invalid (Num={ArrayNum}, Max={ArrayMax})</DisplayString>
+    <DisplayString Condition="PoolType == EPoolType::Paged">Paged, Num={ArrayNum}</DisplayString>
+    <DisplayString Condition="PoolType == EPoolType::NonPaged">NonPaged, Num={ArrayNum}</DisplayString>
+    <DisplayString>Num={ArrayNum}</DisplayString>
     <Expand>
+      <Item Name="[Pool]" Optional="true">PoolType</Item>
       <Item Name="[Num]">ArrayNum</Item>
       <Item Name="[Max]">ArrayMax</Item>
-      <Item Name="[Allocator]">Allocator</Item>
-
-      <Item Name="[Data]" Optional="true">
-        ($T2*)Allocator.Data
-      </Item>
-
-      <ArrayItems Optional="true"
-                  Condition="ArrayNum &gt; 0 &amp;&amp; ArrayNum &lt;= ArrayMax">
+      <!-- Linear allocator: live elements are in the pool block. -->
+      <ArrayItems Optional="true" Condition="ArrayNum &gt; 0 &amp;&amp; ArrayNum &lt;= ArrayMax &amp;&amp; Allocator.Block.Allocation != 0">
         <Size>ArrayNum</Size>
-        <ValuePointer>($T2*)Allocator.Data</ValuePointer>
+        <ValuePointer>($T2*)Allocator.Block.Allocation</ValuePointer>
+      </ArrayItems>
+      <!-- Fixed allocator: live elements are in its inline storage. -->
+      <ArrayItems Optional="true" Condition="ArrayNum &gt; 0 &amp;&amp; ArrayNum &lt;= ArrayMax">
+        <Size>ArrayNum</Size>
+        <ValuePointer>($T2*)Allocator.Storage</ValuePointer>
       </ArrayItems>
     </Expand>
-
   </Type>
-
+  <!-- FString is an alias of FKrnlString. Data.ArrayNum includes its null terminator. -->
+  <Type Name="FKrnlString&lt;*&gt;">
+    <DisplayString Condition="Data.ArrayNum &lt; 0 || Data.ArrayMax &lt; 0 || Data.ArrayNum &gt; Data.ArrayMax">Invalid (Num={Data.ArrayNum}, Max={Data.ArrayMax})</DisplayString>
+    <DisplayString Condition="Data.ArrayNum &gt; 0 &amp;&amp; Data.Allocator.Block.Allocation == 0">Invalid (null data, Num={Data.ArrayNum})</DisplayString>
+    <DisplayString Condition="PoolType == EPoolType::Paged &amp;&amp; Data.ArrayNum == 0">Paged, Len=0, ""</DisplayString>
+    <DisplayString Condition="PoolType == EPoolType::NonPaged &amp;&amp; Data.ArrayNum == 0">NonPaged, Len=0, ""</DisplayString>
+    <DisplayString Condition="Data.ArrayNum == 0">Len=0, ""</DisplayString>
+    <DisplayString Condition="PoolType == EPoolType::Paged">Paged, Len={Data.ArrayNum - 1}, {(wchar_t*)Data.Allocator.Block.Allocation,su}</DisplayString>
+    <DisplayString Condition="PoolType == EPoolType::NonPaged">NonPaged, Len={Data.ArrayNum - 1}, {(wchar_t*)Data.Allocator.Block.Allocation,su}</DisplayString>
+    <DisplayString>Len={Data.ArrayNum - 1}, {(wchar_t*)Data.Allocator.Block.Allocation,su}</DisplayString>
+    <StringView Condition="Data.ArrayNum &gt; 0 &amp;&amp; Data.Allocator.Block.Allocation != 0">(wchar_t*)Data.Allocator.Block.Allocation,su</StringView>
+    <Expand>
+      <Item Name="[Pool]" Optional="true">PoolType</Item>
+      <Item Name="[Len]" Condition="Data.ArrayNum &gt; 0">Data.ArrayNum - 1</Item>
+      <Item Name="[Len]" Condition="Data.ArrayNum == 0">0</Item>
+      <Item Name="[Max]">Data.ArrayMax</Item>
+      <ArrayItems Optional="true" Condition="Data.ArrayNum &gt; 1 &amp;&amp; Data.ArrayNum &lt;= Data.ArrayMax &amp;&amp; Data.Allocator.Block.Allocation != 0">
+        <Size>Data.ArrayNum - 1</Size>
+        <ValuePointer>(wchar_t*)Data.Allocator.Block.Allocation</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
 </AutoVisualizer>

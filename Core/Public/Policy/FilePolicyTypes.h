@@ -5,21 +5,29 @@
 
 namespace Argus::Policy
 {
-	enum class EFileObjectPolicySource: uint8
+	enum class EMinifilterPolicySource: uint8
 	{
 		None,
-		ProtectedProcessAsset,
-		ArgusProcessAsset,
-		ExplicitAsset,
+		ProtectedProcessAssets,
+		ArgusProcessAssets,
+		ExplicitAssets,
 	};
 
-	enum class EFileObjectPolicyScope : uint8
+	enum class EMinifilterFileMatchMode : uint8
+	{
+		Path,
+		Identity,
+		AnyOf,
+	};
+
+	enum class EMinifilterPolicyScope : uint8
 	{
 		FileOnly,
 		DirectoryTree,
+		Volume,
 	};
 
-	enum class EFileObjecyPolicyOperationFlags : uint32
+	enum class EMinifilterPolicyOperationFlags : uint32
 	{
 		None				= 0u,
 		Read				= 1u << 0,
@@ -33,31 +41,37 @@ namespace Argus::Policy
 		SetSecurity			= 1u << 8,
 	};
 
-	enum class EFileObjectMatchMode : uint8
+	enum class EVolumeDescriptorFields : uint32
 	{
-		Path,
-		Identity,
-		AnyOf,
+		None		 = 0,
+		Guid		 = 1u << 0,
+		SerialNumber = 1u << 1,
 	};
 
-	struct FFileObjectDescriptor
+	struct FVolumeDescriptor
 	{
-		uint64 FileObjectId;
-		uint64 VolumeSerialNumber;
+		uint32 ValidFields = 0;
+		uint64 VolumeSerialNumber = 0;
+		uint8 VolumeGuid[16]{};
 	};
 
-	struct FFileObjectPolicyRuleDescriptor
+	struct FFileDescriptor
+	{
+	};
+
+	struct FMinifilterPolicyRuleDescriptor
 	{
 		uint32 PolicyId;
 
 		Argus::Policy::EPolicyRole Owner;
 		uint32 OwnerProcessId;
-		uint32 OwnerThreadId;
+		uint32 OwnerThreadId; // Optional
 
-		FFileObjectDescriptor FileDescriptor;
+		FVolumeDescriptor VolumeDescriptor;
+		FFileDescriptor FileDescriptor;
 
-		EFileObjectPolicySource Source;
-		EFileObjectPolicyScope Scope;
-		EFileObjecyPolicyOperationFlags DeniedOpFlags;
+		EMinifilterPolicySource Source;
+		EMinifilterPolicyScope Scope;
+		EMinifilterPolicyOperationFlags DeniedOpFlags;
 	};
 }

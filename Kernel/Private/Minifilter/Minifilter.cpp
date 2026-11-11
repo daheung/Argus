@@ -1,4 +1,6 @@
 #include "Kernel/Private/Minifilter/Minifilter.h"
+#include "Kernel/Private/Minifilter/Operation/CreateOperation.h"
+#include "Kernel/Private/DriverContext.h"
 
 #include <fltKernel.h>
 
@@ -21,7 +23,16 @@ namespace
 	FLT_PREOP_CALLBACK_STATUS FLTAPI PreCreate(
 		PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext)
 	{
-		return PrePassThrough(Data, FltObjects, CompletionContext);
+		return FCreateOperation::OnPreOperationCallback(
+			GDriverContext->GetMinifilter(), Data, FltObjects, CompletionContext);
+	}
+
+	FLT_POSTOP_CALLBACK_STATUS FLTAPI PostCreate(
+		PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects,
+		PVOID CompletionContext, FLT_POST_OPERATION_FLAGS Flags)
+	{
+		return FCreateOperation::OnPostOperationCallback(
+			GDriverContext->GetMinifilter(), Data, FltObjects, CompletionContext, Flags);
 	}
 
 	FLT_PREOP_CALLBACK_STATUS FLTAPI PreRead(
@@ -46,6 +57,28 @@ namespace
 		PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext)
 	{
 		return PrePassThrough(Data, FltObjects, CompletionContext);
+	}
+
+	FLT_PREOP_CALLBACK_STATUS FLTAPI PreSetVolumeInformation(
+		PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext)
+	{
+		UNREFERENCED_PARAMETER(Data);
+		UNREFERENCED_PARAMETER(FltObjects);
+		*CompletionContext = nullptr;
+		return FLT_PREOP_SYNCHRONIZE;
+	}
+
+	FLT_POSTOP_CALLBACK_STATUS FLTAPI PostSetVolumeInformation(
+		PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects,
+		PVOID CompletionContext, FLT_POST_OPERATION_FLAGS Flags)
+	{
+		UNREFERENCED_PARAMETER(CompletionContext);
+		if ((Flags & FLTFL_POST_OPERATION_DRAINING) == 0 && NT_SUCCESS(Data->IoStatus.Status))
+		{
+			GDriverContext->GetMinifilter().GetVolumeContext().RecordSetVolumeInformation(
+				FltObjects, Data->Iopb->Parameters.SetVolumeInformation.FsInformationClass);
+		}
+		return FLT_POSTOP_FINISHED_PROCESSING;
 	}
 
 	FLT_PREOP_CALLBACK_STATUS FLTAPI PreDirectoryControl(
@@ -112,12 +145,16 @@ namespace
 		PCFLT_RELATED_OBJECTS FltObjects, FLT_INSTANCE_SETUP_FLAGS Flags, 
 		DEVICE_TYPE VolumeDeviceType, FLT_FILESYSTEM_TYPE VolumeFilesystemType
 	) {
-		UNREFERENCED_PARAMETER(FltObjects);
 		UNREFERENCED_PARAMETER(Flags);
-		UNREFERENCED_PARAMETER(VolumeDeviceType);
 
-		return VolumeFilesystemType == FLT_FSTYPE_NTFS
-			? STATUS_SUCCESS : STATUS_FLT_DO_NOT_ATTACH;
+		if (VolumeFilesystemType != FLT_FSTYPE_NTFS)
+		{
+			return STATUS_FLT_DO_NOT_ATTACH;
+		}
+
+		return GDriverContext->GetMinifilter().GetVolumeContext().RegisterVolume(
+			FltObjects->Instance, FltObjects->Volume,
+			VolumeDeviceType, VolumeFilesystemType);
 	}
 
 	NTSTATUS InstanceQueryTeardown(PCFLT_RELATED_OBJECTS FltObjects, FLT_INSTANCE_QUERY_TEARDOWN_FLAGS Flags)
@@ -135,17 +172,18 @@ namespace
 
 	void InstanceTeardownComplete(PCFLT_RELATED_OBJECTS FltObjects, FLT_INSTANCE_QUERY_TEARDOWN_FLAGS Flags)
 	{
-		UNREFERENCED_PARAMETER(FltObjects);
 		UNREFERENCED_PARAMETER(Flags);
+		GDriverContext->GetMinifilter().GetVolumeContext().UnregisterVolume(FltObjects->Volume);
 	}
 
 	const FLT_OPERATION_REGISTRATION Operations[] =
 	{
-		{ IRP_MJ_CREATE				, 0, PreCreate, nullptr },
+		{ IRP_MJ_CREATE				, 0, PreCreate, PostCreate },
 		{ IRP_MJ_READ				, 0, PreRead, nullptr },
 		{ IRP_MJ_WRITE				, 0, PreWrite, nullptr },
 		{ IRP_MJ_QUERY_INFORMATION	, 0, PreQueryInformation, nullptr },
 		{ IRP_MJ_SET_INFORMATION	, 0, PreSetInformation, nullptr },
+		{ IRP_MJ_SET_VOLUME_INFORMATION, 0, PreSetVolumeInformation, PostSetVolumeInformation },
 		{ IRP_MJ_DIRECTORY_CONTROL	, 0, PreDirectoryControl, nullptr },
 		{ IRP_MJ_QUERY_SECURITY		, 0, PreQuerySecurity, nullptr },
 		{ IRP_MJ_SET_SECURITY		, 0, PreSetSecurity, nullptr },
@@ -162,7 +200,7 @@ namespace
 	{
 		sizeof(FLT_REGISTRATION),
 		FLT_REGISTRATION_VERSION,
-		0,
+		FLTFL_REGISTRATION_SUPPORT_NPFS_MSFS,
 		nullptr,
 		Operations,
 		Driver::ArgusFilterUnload,
@@ -173,13 +211,18 @@ namespace
 	};
 }
 
-NTSTATUS FMinifilter::Start(PDRIVER_OBJECT DriverObject) noexcept
+NTSTATUS FMinifilter::InitStart(PDRIVER_OBJECT DriverObject) noexcept
 {
 	if (bStartAttempted)
 	{
 		return STATUS_INVALID_DEVICE_STATE;
 	}
 	bStartAttempted = true;
+
+	if (!FilterContainer.Initialize())
+	{
+		return STATUS_INSUFFICIENT_RESOURCES;
+	}
 
 	NTSTATUS Status = FltRegisterFilter(DriverObject, &Registration, &Filter);
 	if (!NT_SUCCESS(Status))
@@ -235,7 +278,8 @@ NTSTATUS FMinifilter::SetFilterMode(EFilterMode NewMode) noexcept
 	{
 		return STATUS_DEVICE_NOT_READY;
 	}
-	if (NewMode != EFilterMode::Pass)
+	if (NewMode != EFilterMode::Pass &&
+		NewMode != EFilterMode::Passive)
 	{
 		// File event collection and an enforcement policy are not wired yet.
 		return STATUS_NOT_SUPPORTED;

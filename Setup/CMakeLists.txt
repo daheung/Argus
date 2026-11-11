@@ -1,6 +1,6 @@
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.23)
-    project(ArgusSetup VERSION 0.4.1 LANGUAGES CXX)
+    project(ArgusSetup VERSION 1.0.3 LANGUAGES CXX)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
@@ -20,11 +20,12 @@ if(TARGET ArgusAgent AND TARGET ArgusKernelPackage)
         DEPENDS ArgusSetup ArgusAgent ArgusKernelPackage
         VERBATIM
     )
+    set_target_properties(ArgusBundle PROPERTIES FOLDER "Packaging")
 
     find_program(ARGUS_WIX_EXECUTABLE NAMES wix wix.exe
         HINTS "${PROJECT_SOURCE_DIR}/.build/wix4-tools")
     if(ARGUS_WIX_EXECUTABLE)
-        add_custom_target(ArgusMsi
+        add_custom_target(ArgusMsi ALL
             COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/Msi/$<CONFIG>"
             COMMAND "${ARGUS_WIX_EXECUTABLE}" build -arch x64
                 -d "ArgusVersion=${PROJECT_VERSION}"
@@ -34,6 +35,7 @@ if(TARGET ArgusAgent AND TARGET ArgusKernelPackage)
             DEPENDS ArgusBundle
             VERBATIM
         )
+        set_target_properties(ArgusMsi PROPERTIES FOLDER "Packaging")
     else()
         message(STATUS "WiX Toolset not found: install wix.exe and reconfigure to enable ArgusMsi")
     endif()

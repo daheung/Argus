@@ -6,13 +6,14 @@
 #include "Kernel/Public/Containers/KrnlContainerForward.h"
 #include "Kernel/Private/Notify/LockType.h"
 
-class FFileObjectPolicyRegistry
+class FMinifilterPolicyRegistry
 {
 public:
-	typedef TArray<EPoolType::NonPaged, Argus::Policy::FFileObjectPolicyRuleDescriptor> TRuleArray;
+	typedef TArray<EPoolType::NonPaged, Argus::Policy::FMinifilterPolicyRuleDescriptor> TRuleArray;
 
 public:
-	FFileObjectPolicyRegistry() noexcept
+	FMinifilterPolicyRegistry() noexcept
+		: PolicyRules('tlFk')
 	{
 		ExInitializePushLock(&this->PolicyRulesLock);
 	}

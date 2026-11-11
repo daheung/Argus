@@ -30,9 +30,9 @@ namespace
 	constexpr size_t RegistryInitialBufferBytes = 64u * 1024u;
 	// A record holds at most two UNICODE_STRING names, each with a 16-bit byte length.
 	constexpr size_t RegistryMaxBufferBytes = 256u * 1024u;
-	constexpr uint32 AgentMajorVersion = 0;
-	constexpr uint32 AgentMinorVersion = 4;
-	constexpr uint32 AgentPatchVersion = 1;
+	constexpr uint32 AgentMajorVersion = 1;
+	constexpr uint32 AgentMinorVersion = 0;
+	constexpr uint32 AgentPatchVersion = 3;
 	constexpr WCHAR ProtectedExecutableName[] = L"maruexe.local.exe";
 	constexpr WCHAR AgentServiceName[] = L"ArgusAgent";
 	std::atomic<HANDLE> GStopEvent{ nullptr };

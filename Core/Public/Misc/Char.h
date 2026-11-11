@@ -76,26 +76,26 @@ struct TChar :
 	}
 };
 
-template<> inline bool TChar<ANSICHAR>::IsUpper(ANSICHAR Char) { return isupper((unsigned char)Char) != 0; }
-template<> inline bool TChar<ANSICHAR>::IsLower(ANSICHAR Char) { return islower((unsigned char)Char) != 0; }
-template<> inline bool TChar<ANSICHAR>::IsAlpha(ANSICHAR Char) { return isalpha((unsigned char)Char) != 0; }
-template<> inline bool TChar<ANSICHAR>::IsGraph(ANSICHAR Char) { return isgraph((unsigned char)Char) != 0; }
-template<> inline bool TChar<ANSICHAR>::IsPrint(ANSICHAR Char) { return isprint((unsigned char)Char) != 0; }
-template<> inline bool TChar<ANSICHAR>::IsPunct(ANSICHAR Char) { return ispunct((unsigned char)Char) != 0; }
-template<> inline bool TChar<ANSICHAR>::IsAlnum(ANSICHAR Char) { return isalnum((unsigned char)Char) != 0; }
-template<> inline bool TChar<ANSICHAR>::IsDigit(ANSICHAR Char) { return isdigit((unsigned char)Char) != 0; }
-template<> inline bool TChar<ANSICHAR>::IsHexDigit(ANSICHAR Char) { return isxdigit((unsigned char)Char) != 0; }
-template<> inline bool TChar<ANSICHAR>::IsWhitespace(ANSICHAR Char) { return isspace((unsigned char)Char) != 0; }
-template<> inline bool TChar<ANSICHAR>::IsControl(ANSICHAR Char) { return iscntrl((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsUpper(ANSICHAR Char)		{ return isupper ((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsLower(ANSICHAR Char)		{ return islower ((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsAlpha(ANSICHAR Char)		{ return isalpha ((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsGraph(ANSICHAR Char)		{ return isgraph ((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsPrint(ANSICHAR Char)		{ return isprint ((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsPunct(ANSICHAR Char)		{ return ispunct ((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsAlnum(ANSICHAR Char)		{ return isalnum ((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsDigit(ANSICHAR Char)		{ return isdigit ((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsHexDigit(ANSICHAR Char)	{ return isxdigit((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsWhitespace(ANSICHAR Char) { return isspace ((unsigned char)Char) != 0; }
+template<> inline bool TChar<ANSICHAR>::IsControl(ANSICHAR Char)	{ return iscntrl ((unsigned char)Char) != 0; }
 
-template<> inline bool TChar<WIDECHAR>::IsUpper(WIDECHAR Char)		{ return iswupper(Char) != 0; }
-template<> inline bool TChar<WIDECHAR>::IsLower(WIDECHAR Char)		{ return iswlower(Char) != 0; }
-template<> inline bool TChar<WIDECHAR>::IsAlpha(WIDECHAR Char)		{ return iswalpha(Char) != 0; }
-template<> inline bool TChar<WIDECHAR>::IsGraph(WIDECHAR Char)		{ return iswgraph(Char) != 0; }
-template<> inline bool TChar<WIDECHAR>::IsPrint(WIDECHAR Char)		{ return iswprint(Char) != 0; }
-template<> inline bool TChar<WIDECHAR>::IsPunct(WIDECHAR Char)		{ return iswpunct(Char) != 0; }
-template<> inline bool TChar<WIDECHAR>::IsAlnum(WIDECHAR Char)		{ return iswalnum(Char) != 0; }
-template<> inline bool TChar<WIDECHAR>::IsDigit(WIDECHAR Char)		{ return iswdigit(Char) != 0; }
+template<> inline bool TChar<WIDECHAR>::IsUpper(WIDECHAR Char)		{ return iswupper (Char) != 0; }
+template<> inline bool TChar<WIDECHAR>::IsLower(WIDECHAR Char)		{ return iswlower (Char) != 0; }
+template<> inline bool TChar<WIDECHAR>::IsAlpha(WIDECHAR Char)		{ return iswalpha (Char) != 0; }
+template<> inline bool TChar<WIDECHAR>::IsGraph(WIDECHAR Char)		{ return iswgraph (Char) != 0; }
+template<> inline bool TChar<WIDECHAR>::IsPrint(WIDECHAR Char)		{ return iswprint (Char) != 0; }
+template<> inline bool TChar<WIDECHAR>::IsPunct(WIDECHAR Char)		{ return iswpunct (Char) != 0; }
+template<> inline bool TChar<WIDECHAR>::IsAlnum(WIDECHAR Char)		{ return iswalnum (Char) != 0; }
+template<> inline bool TChar<WIDECHAR>::IsDigit(WIDECHAR Char)		{ return iswdigit (Char) != 0; }
 template<> inline bool TChar<WIDECHAR>::IsHexDigit(WIDECHAR Char)	{ return iswxdigit(Char) != 0; }
-template<> inline bool TChar<WIDECHAR>::IsWhitespace(WIDECHAR Char) { return iswspace(Char) != 0; }
-template<> inline bool TChar<WIDECHAR>::IsControl(WIDECHAR Char)	{ return iswcntrl(Char) != 0; }
+template<> inline bool TChar<WIDECHAR>::IsWhitespace(WIDECHAR Char) { return iswspace (Char) != 0; }
+template<> inline bool TChar<WIDECHAR>::IsControl(WIDECHAR Char)	{ return iswcntrl (Char) != 0; }

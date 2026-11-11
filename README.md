@@ -2,6 +2,8 @@
 
 Windows x64 / MSVC / C++17 기반 프로젝트입니다.
 
+버전별 변경사항은 [변경 이력](CHANGELOG.md)에 기록합니다. 버전을 올릴 때 해당 버전의 항목을 추가합니다.
+
 | 폴더 | CMake 대상 | 역할 |
 | --- | --- | --- |
 | `Agent` | `ArgusAgent` | 사용자 모드 실행 파일 |
@@ -29,15 +31,15 @@ ArgusAgent.exe
 
 ## MSI 설치 프로그램 (테스트용)
 
-WiX Toolset v4의 `wix.exe`를 설치하고 CMake를 다시 구성하면 `ArgusMsi` 대상이 생성됩니다. `ArgusBundle`을 먼저 빌드하여 Agent, 설치 도우미, 서명된 드라이버 패키지를 모은 뒤 WiX로 단일 MSI를 만듭니다. 아래 명령은 WiX 4.0.5를 작업 공간에 설치합니다.
+WiX Toolset v4의 `wix.exe`를 설치하고 CMake를 다시 구성하면 일반 빌드에 `ArgusMsi`가 포함됩니다. 빌드 시 `ArgusBundle`이 Agent, 설치 도우미, 서명된 드라이버 패키지를 모은 뒤 WiX로 단일 MSI를 만듭니다. 아래 명령은 WiX 4.0.5를 작업 공간에 설치합니다.
 
 ```powershell
 dotnet tool install wix --version 4.0.5 --tool-path .build/wix4-tools
 cmake --preset windows-msvc-x64
-cmake --build --preset release --target ArgusMsi
+cmake --build --preset release
 ```
 
-테스트 VM 준비가 끝나면 `.build/windows-msvc-x64/Msi/Release/Argus-0.4.1-x64.msi`를 더블클릭해 설치합니다. 제거는 Windows **설치된 앱 → Argus → 제거**에서 진행합니다. 설치·제거 확인 명령은 선택 사항이며, 정상 사용에 필요하지 않습니다.
+테스트 VM 준비가 끝나면 `.build/windows-msvc-x64/Msi/Release/Argus-1.0.3-x64.msi`를 더블클릭해 설치합니다. 제거는 Windows **설치된 앱 → Argus → 제거**에서 진행합니다. 설치·제거 확인 명령은 선택 사항이며, 정상 사용에 필요하지 않습니다.
 
 MSI는 `%ProgramFiles%\Argus` 아래의 Agent/도우미/드라이버 패키지 파일을 설치하고, `ArgusAgent` 서비스를 생성·자동 시작하며, Windows의 **설치된 앱**에 Argus를 등록합니다. 제거하면 MSI가 Agent 서비스를 중지·삭제하고 설치 파일을 제거합니다. MSI가 호출하는 `ArgusSetup.exe msi-driver-install`과 `msi-driver-uninstall`은 드라이버 INF 등록·제거를 담당합니다. 설치 시 도우미는 `ArgusAgent`의 서비스 SID 유형을 `UNRESTRICTED`로 설정하고 `%ProgramData%\Argus` 로그 폴더와 기존 `Agent.log`에 DACL을 적용합니다. 제거 시 `ArgusKernel` 서비스를 별도로 삭제합니다. MSI 제거 도우미는 설치 경로의 `.vs`를 포함한 추가 파일과 하위 폴더를 먼저 정리하고, MSI가 관리하는 파일과 빈 설치 폴더는 MSI가 제거합니다. 로그 폴더와 로그 파일은 제거 후에도 남습니다.
 

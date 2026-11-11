@@ -4,7 +4,9 @@
 #include "Kernel/Public/Misc/KernelDefines.h"
 #include "Kernel/Public/Containers/KrnlArray.h"
 #include "Kernel/Public/Containers/KrnlContainerForward.h"
-#include "Kernel/Private/Minifilter/FilePolicyRegistry.h"
+#include "Kernel/Private/Minifilter/MinifilterPolicyRegistry.h"
+#include "Kernel/Private/Minifilter/MinifilterContainer.h"
+#include "Kernel/Private/Minifilter/Volume/Volume.h"
 
 enum class EFilterMode : uint32
 {
@@ -24,19 +26,24 @@ enum class EFilterState : uint32
 class FMinifilter
 {
 public:
-	typedef TArray<EPoolType::NonPaged, Argus::Policy::FFileObjectPolicyRuleDescriptor> FNonPFileObjectRules;
+	typedef TArray<EPoolType::NonPaged, Argus::Policy::FMinifilterPolicyRuleDescriptor> FNonPFileObjectRules;
 
 public:
 	FMinifilter() noexcept
+		: Filter(nullptr)
+		, bStartAttempted(false)
+		, UnregisterComplete()
+		, FilterPolicyRegistry()
 	{
 		KeInitializeEvent(&UnregisterComplete, NotificationEvent, FALSE);
 	}
+
 	FMinifilter(const FMinifilter&) = delete;
 	FMinifilter& operator=(const FMinifilter&) = delete;
 
 	// Start and destruction must be serialized with unregister requests.
 	// Concurrent UnregisterFilter callers wait for the same teardown to finish.
-	NTSTATUS Start(PDRIVER_OBJECT DriverObject) noexcept;
+	NTSTATUS InitStart(PDRIVER_OBJECT DriverObject) noexcept;
 	
 	void UnregisterFilter() noexcept;
 
@@ -53,13 +60,27 @@ public:
 		return static_cast<EFilterState>(FilterState.load(Atomic::EMemoryOrder::Acquire));
 	}
 
+	NODISCARD FORCEINLINE FMinifilterContainer& GetOperationContainer() noexcept
+	{
+		return FilterContainer;
+	}
+
+	NODISCARD FORCEINLINE FMinifilterVolumeContext& GetVolumeContext() noexcept
+	{
+		return VolumeContext;
+	}
+
 private:
-	PFLT_FILTER Filter = nullptr;
-	bool bStartAttempted = false;
+	PFLT_FILTER Filter;
+	bool bStartAttempted;
 	KEVENT UnregisterComplete;
-	
-	FFileObjectPolicyRegistry FileObjectPolicyRegistry;
+
+	FMinifilterVolumeContext VolumeContext;
+
+	FMinifilterPolicyRegistry FilterPolicyRegistry;
 
 	TKernelAtomicCounter<uint32> FilterMode{ static_cast<uint32>(EFilterMode::None) };
 	TKernelAtomicCounter<uint32> FilterState{ static_cast<uint32>(EFilterState::Unregistered) };
+
+	FMinifilterContainer FilterContainer;
 };
