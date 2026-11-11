@@ -157,7 +157,7 @@ struct FProcessNotifyInfo
   EPolicyStatus PolicyStatus = EPolicyStatus::AccessPass;
 };
 ```
-수집되는 모든 프로세스들은 `Role`을 부여받습니다. `Role`은 Agent가 IOCTL을 통해 등록할 수 있으며 `PolicyRole`에 저장합니다. 각각 `None(정책을 적용받지 않는 프로세스)`와 `AgentProcess(Agent 프로세스)`, `ProtectedProcess(Agent가 보호 대상으로 등록한 프로세스)`, `IsolatedProcess(Agent가 격리 대상으로 등록한 프로세스)`가 존재합니다. Callback System은 이를 참고하여 프로세스마다 `Role`을 부여하고 이후 모니터링 시스템에서 기록합니다. 
+수집되는 모든 프로세스들은 `Role`을 부여받습니다. `Role`은 Agent가 IOCTL을 통해 등록할 수 있으며 `PolicyRole`에 저장합니다. 각각 `AgentProcess(Agent 프로세스)`와 `ProtectedProcess(Agent가 보호 대상으로 등록한 프로세스)`, `IsolatedProcess(Agent가 격리 대상으로 등록한 프로세스)`, `None(나머지 프로세스)`가 존재합니다. Callback System은 이를 참고하여 프로세스마다 `Role`을 부여하고 이후 모니터링 시스템에서 기록합니다. 
 
 프로세스에 대한 이벤트가 들어오면 Callback System에서 먼저 프로세스의 `Role`을 확인합니다. 이후 정책을 적용하고 이를 `PolicyStatus`에 기록합니다. 이후 Notify System에 이를 전달하고 기록합니다.
 
@@ -199,7 +199,14 @@ struct FImageNotifyInfo
 
 ### 5.4 프로세스 보호 및 격리
 
-객체 콜백은 프로세스·스레드 핸들 생성과 복제 요청을 관찰합니다. Agent와 보호 대상에 대한 특정 프로세스 핸들 권한을 제거하고, 격리 대상에 대해서는 설정된 플래그에 따라 권한을 제한합니다. 격리 대상의 자식 프로세스 생성을 거부하는 플래그도 처리합니다. 보호·격리 대상 등록은 Agent IOCTL로 수행합니다.
+Object callback은 Handle에 대한 작업을 관찰하고 수정합니다. 작업을 수행하는 프로세스마다 `Role`을 확인하고 정책에 따라 권한을 축소합니다. Handle에 대한 작업 대상이 본인이 되는 경우에는 정책을 적용하지 않습니다. 
+
+Object callback이 권한을 축소하는 경우는 다음과 같습니다:
+1. Process Handle에 대하여, 작업 대상이 임의의 Process Handle -> `ProtectedProcess`가 적용된 Process Handle일 경우, 감소되는 권한은 `Terminate`, `CreateThread`, `VMOperation`, `VMWrite`, `DupHandle`, `CreateProcess`입니다.
+2. Process Handle에 대하여, 작업 대상이 `IsolatedProcess`가 적용된 Process Handle ->  임의의 Process Handle일 경우, 정책이 `RestrictProcessHandleRights`일 때 감소되는 권한은 `Terminate`, `CreateThread`, `VMOperation`, `VMWrite`, `DupHandle`, `CreateProcess`, `SuspendResume`입니다.
+3. Thread Handle에 대하여, 작업 대상이 임의의 Thread Handle -> `ProtectedProcess`가 적용된 프로세스의 Thread Handle일 경우, `Terminate`, `SuspendResume`, `SetContext`, `SetInformation`, `SetThreadToken`, `Impersonate`, `DirectImpersonation`, `SetLimitedInformation`입니다.
+
+Agent는 IOCTL을 사용하여 보호 및 격리 프로세스 등록을 수행합니다.
 
 ### 5.5 파일 시스템 Minifilter
 
