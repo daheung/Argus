@@ -12,4 +12,3 @@
 - WinDbg Natvis에 배열 및 `FKrnlString`의 풀 종류, 길이, 문자열 표시를 보완했습니다.
 - Agent, Kernel, INF, MSI 버전을 1.0.3으로 맞추고, WiX가 설치된 경우 일반 Release 빌드에 MSI 생성이 포함되도록 했습니다.
 
-검증: Release MSI 빌드에 성공했고, `Argus-1.0.3-x64.msi`의 `ProductVersion`이 `1.0.3`임을 확인했습니다. VM 실행 검증은 아직 하지 않았습니다.
