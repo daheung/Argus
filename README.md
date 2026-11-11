@@ -264,6 +264,11 @@ FORCEINLINE auto& FMinifilterContainer::Get<Argus::Minifilter::EOperation::Creat
 }
 ```
 
+호출 방법은 다음과 같습니다:
+```C++
+FCreateOperationContainer& CreateOpContainer = MinifilterContainer.Get<Argus::Minifilter::Create>();
+```
+
 이러한 설계는 불필요한 캐스팅을 줄이면서 Operation 종류가 늘어나도 함수 하나로 단순하게 호출하기 위함입니다. 또한, Container 선택 경로를 컴파일 시간에 결정하여 런타임을 감소시키는 최적화 과정입니다. 
 
 ### 5.5.1 Create
@@ -305,6 +310,28 @@ struct FCreateOperationDescriptor
   ...
 };
 ```
+
+중요한 변수별 의미는 다음과 같습니다:
+- `RequestorPid`: Pre-create 시점에서 I/O Create를 생성한 PID입니다.
+- `RequestorTid`: Pre-create 시점에서 I/O Create를 생성한 Process의 TID 입니다. 0일 수 있습니다.
+- `ProcessorMode`: Pre-create 시점에서 I/O 요청이 발생했을 때의 실행 권한입니다. `UserMode`, `KernelMode`중에 부여됩니다.
+- `ObservedAt`: Pre-create 시점에서 I/O 요청이 발생했을 때의 관측시간입니다.
+- `OperationFlags`: Pre-create 시점에서 I/O 요청이 발생했을 때, Pre-create에서 관측된 `PFLT_CALLBACK_DATA::Iopb::OperationFlags`값 입니다.
+- `SharedAccess`: Pre-create 시점에서 I/O 요청이 발생했을 때, Pre-create에서 관측된 ShareAccess 정보 입니다. `FILE_SHARE_READ`, `FILE_SHARE_WRITE`, `FILE_SHARE_DELETE` 등이 부여될 수 있습니다.
+- `Attribute`: Pre-create 시점에서 I/O 요청이 발생했을 때, Pre-create에서 관측된 ShareAccess 정보 입니다. `CallbackData::Iopb::Parameters::Create::FileAttributes`값 입니다.
+- `...`
+- `PreOperationDecision`: Pre-create 시점에서 `RequestorPid`를 참고하여 적용된 `Rule`의 결과입니다. I/O 요청을 통과시키려면 내부 값을 `PreOperationPass`로 설정합니다. 요청을 차단하려면 `PreOperationBlock`을 사용하고, 결정을 지연하려면 `PreOperationBlock`로 설정할 수 있습니다.
+- `PostOperationDecision`: Post-create 시점에서 `RequestorPid`를 참고하여 적용된 `Rule`의 결과입니다. I/O 요청을 통과시키려면 내부 값을 `PostOperationPass`로 설정합니다. 요청을 차단하려면 `PostOperationBlock`을 사용하고, 추가 작업이 필요하면 `PostOperationMoreProcessingRequired`로 설정할 수 있습니다.
+- `VolumeNameStatus`: 기존에 관측된 Volume 정보를 기반으로 구조체를 생성할 때, `VolueName`을 성공적으로 설정하였다면 `Captured`입니다. 정보를 찾을 수 없거나 Memory 할당이 실패시키면 `Unavailable` 혹은 `AllocationFailed`로 설정됩니다.
+- `FilePathNameStatus`: I/O Create 요청이 발생했을 때, `FilePath`를 성공적으로 설정하였다면 `Captured`입니다. 정보를 찾을 수 없거나 Memory 할당이 실패시키면 `Unavailable` 혹은 `AllocationFailed`로 설정됩니다.
+- `VolumeName`: Pre-craete에서 `FltGetVolumeName`로 관측된 Volume 정보의 이름이 설정됩니다. `VolumeNameStatus`가 `Captured`라면 값이 정상적으로 설정되었음을 의미합니다. 추후 Volume 정보를 기술하는 변수로 교체될 예정입니다.
+- `CompletionVolumeName`: Post-create 시점에서 관측된 Volume 정보의 이름이 설정됩니다. `VolumeNameStatus`가 `Captured`라면 값이 정상적으로 설정되었음을 의미합니다. I/O 요청이 수정되었을 때 감지하기 위해 사용될 수 있습니다. 추후 Volume 정보를 기술하는 변수로 교체될 예정입니다.
+- `CompletionFilePathName`: Post-create 시점에서 관측된 `FilePath` 정보가 설정됩니다. `VolumeNameStatus`가 `Captured`라면 값이 정상적으로 설정되었음을 의미합니다. I/O 요청이 수정되었을 때 감지하기 위해 사용될 수 있습니다.
+- `InternalAttemptedCount`: 아직 사용되지 않습니다. I/O 요청은 Cache Manager, Memory Manager 등에 의하여 n번 벌생할 수 있기 때문에 이를 감지하고 기록하기 위해 사용될 예정입니다.
+- `CompletionInformation`: Post-create 시점에서 관측된 IoStatus의 Information 정보가 들어갑니다. Pre-create 과정에서 다른 Filter가 차단하였으면 설정되지 않습니다.
+- `CompletionStatus`: Post-create 시점에서 관측된 IoStatus의 Status 정보가 들어갑니다. Pre-create 과정에서 다른 Filter가 차단하였으면 설정되지 않습니다.
+
+Post-create에서 설정되는 변수는 Pre-create 과정에서 다른 Filter가 차단하였으면 기록되지 않습니다.
 
 ### 5.6 Agent 서비스 및 설치 관리
 
