@@ -203,14 +203,14 @@ struct FImageNotifyInfo
 
 ### 5.5 파일 시스템 Minifilter
 
-`Minifilter`는 NTFS 볼륨에 연결하고 볼륨 GUID, 장치 경로, 파일 시스템 속성과 드라이브 루트를 관리합니다. Minifilter는 정책을 정의할 `Mode`가 존재하며 크게 4가지가 존재합니다. 각각 `None(FltMgr에 등록되지 않음)`, `Pass(FltMgr에 등록되었고 모든 I/O를 통과시킴)`, `Passive(I/O가 발생하면 기록함)`, `Active(I/O가 발생하면 기록하고 필요에 따라 수정 및 차단)`가 존재하며 기본값은 `Passive`입니다. 
+`Minifilter`는 NTFS 볼륨에 연결하고 볼륨 GUID, 장치 경로, 파일 시스템 속성과 드라이브 루트를 관리합니다. Minifilter는 정책을 정의하는 `Mode`가 존재하며 크게 4가지 종류가 존재합니다. 각각 `Pass(I/O 정보를 기록하지 않고 통과시킴)`, `Passive(I/O 정보를 기록하고 통과시킴)`, `Active(I/O 정보를 기록하고 필요에 따라 수정 및 차단)`, `None(FltMgr에 등록되지 않음)`이 존재하며 기본값은 `Passive`입니다. 
 
-`Mode`는 실시간으로 변경될 수 있으며, 실시간으로 `Mode`를 `None`으로 변경하는 동작은 허용되지 않으며 무시될 수 있습니다. Minifilter는 I/O가 감지되면 현재 `Mode`를 확인하고 I/O를 처리합니다. Pre-operation에서 `Mode`를 확인하면 Post-operation에서는 Pre-operation에서 확인한 `Mode`를 기준으로 처리합니다.
+`Mode`는 실시간으로 변경될 수 있으며, `Mode`를 `None`으로 변경하는 동작은 허용되지 않습니다. Minifilter는 I/O가 감지되면 현재 `Mode`를 확인하고 I/O를 처리합니다. Pre-operation에서 `Mode`를 확인하면 Post-operation에서도 동일한 기준을 따릅니다.
 
 ...
 ### 5.5.1 Volume 정보 저장
 
-`FMinifilter`는 `IRP_MJ_SET_VOLUME_INFORMATION`이 발생했을 때 Post-operation에서 Work Item을 등록하고 드라이브 루트 정보를 갱신하며, DOS 장치 심볼릭 링크를 조회하며 찾지 못하면 `Unavailable`로 기록합니다. 
+`FMinifilter`는 `IRP_MJ_SET_VOLUME_INFORMATION`이 발생했을 때 Post-operation에서 Work Item을 등록하고 드라이브 루트 정보를 갱신하며, Object Manager에서 DOS 장치 심볼릭 링크를 조회하며 찾지 못하면 `Unavailable`로 기록합니다. 
 
 ### 5.5.2 Operation 정보 저장
 ...
