@@ -6,6 +6,7 @@
 #include "Core/Public/DeviceControl/Protocols/ObjectOperationNotifyProtocol.h"
 #include "Core/Public/DeviceControl/Protocols/ProcessNotifyProtocol.h"
 #include "Core/Public/DeviceControl/Protocols/RegistryNotifyProtocol.h"
+#include "Core/Public/DeviceControl/Protocols/FltGetIrpOperationProtocol.h"
 #include "Core/Public/DeviceControl/Protocols/RegisterAgentProtocol.h"
 #include "Core/Public/DeviceControl/Protocols/RegisterProcessProtocol.h"
 #include "Core/Public/DeviceControl/Protocols/ThreadNotifyProtocol.h"
@@ -30,9 +31,11 @@ namespace
 	constexpr size_t RegistryInitialBufferBytes = 64u * 1024u;
 	// A record holds at most two UNICODE_STRING names, each with a 16-bit byte length.
 	constexpr size_t RegistryMaxBufferBytes = 256u * 1024u;
+	constexpr size_t FltInitialBufferBytes = 64u * 1024u;
+	constexpr size_t FltMaxBufferBytes = 1024u * 1024u;
 	constexpr uint32 AgentMajorVersion = 1;
-	constexpr uint32 AgentMinorVersion = 0;
-	constexpr uint32 AgentPatchVersion = 3;
+	constexpr uint32 AgentMinorVersion = 1;
+	constexpr uint32 AgentPatchVersion = 1;
 	constexpr WCHAR ProtectedExecutableName[] = L"maruexe.local.exe";
 	constexpr WCHAR AgentServiceName[] = L"ArgusAgent";
 	std::atomic<HANDLE> GStopEvent{ nullptr };
@@ -611,6 +614,129 @@ namespace
 		return EscapeForLog(Utf8);
 	}
 
+	const char* FltStringStatusName(Argus::DeviceControl::EStringStatus Status) noexcept
+	{
+		switch (Status)
+		{
+		case Argus::DeviceControl::EStringStatus::NotApplicable: return "not_applicable";
+		case Argus::DeviceControl::EStringStatus::Captured: return "captured";
+		case Argus::DeviceControl::EStringStatus::Unavailable: return "unavailable";
+		case Argus::DeviceControl::EStringStatus::AllocationFailed: return "allocation_failed";
+		default: return "unknown";
+		}
+	}
+
+	bool ValidateFltString(const Argus::DeviceControl::FStringDescriptor& String,
+		size_t TotalBytes, size_t& Offset) noexcept
+	{
+		if (String.Status > Argus::DeviceControl::EStringStatus::AllocationFailed ||
+			String.Offset != Offset || String.Bytes % sizeof(WCHAR) != 0 ||
+			String.Bytes > TotalBytes - Offset ||
+			(String.Status != Argus::DeviceControl::EStringStatus::Captured && String.Bytes != 0))
+		{
+			return false;
+		}
+		Offset += static_cast<size_t>(String.Bytes);
+		return true;
+	}
+
+	bool ParseFltCreateBatch(const uint8* Buffer, size_t BytesReturned,
+		const Argus::DeviceControl::FFltIrpOperationRP& Request,
+		Argus::DeviceControl::FFltIrpOperationHeader& Header,
+		std::vector<Argus::DeviceControl::FFltIrpCreateOperationRecord>& Records)
+	{
+		using FHeader = Argus::DeviceControl::FFltIrpOperationHeader;
+		using FRecord = Argus::DeviceControl::FFltIrpCreateOperationRecord;
+		if (BytesReturned < sizeof(FHeader))
+		{
+			return false;
+		}
+		std::memcpy(&Header, Buffer, sizeof(Header));
+		if (Header.Version != FHeader::HeaderVersion ||
+			Header.HeaderBytes != sizeof(FHeader) || Header.TotalBytes != BytesReturned ||
+			Header.TotalCount > Request.CurRecordCount ||
+			Header.NextRecordCount > Request.NextRecordCount ||
+			(Header.NextRecordCount == 0) != (Header.NextRecordBytes == 0) ||
+			Header.NextRecordBytes < static_cast<uint64>(Header.NextRecordCount) * sizeof(FRecord))
+		{
+			return false;
+		}
+
+		size_t Offset = sizeof(FHeader);
+		while (Offset < BytesReturned)
+		{
+			if (BytesReturned - Offset < sizeof(FRecord))
+			{
+				return false;
+			}
+			FRecord Record{};
+			std::memcpy(&Record, Buffer + Offset, sizeof(Record));
+			if (Record.OperationFlags != Argus::Policy::EMinifilterPolicyOperationFlags::Create ||
+				Record.PaddingBytes >= FRecord::RecordAlignment)
+			{
+				return false;
+			}
+
+			size_t NextOffset = Offset + sizeof(FRecord);
+			if (!ValidateFltString(Record.VolumeName, BytesReturned, NextOffset) ||
+				!ValidateFltString(Record.FilePathName, BytesReturned, NextOffset) ||
+				!ValidateFltString(Record.CompletionVolumeName, BytesReturned, NextOffset) ||
+				!ValidateFltString(Record.CompletionFilePathName, BytesReturned, NextOffset) ||
+				Record.PaddingBytes > BytesReturned - NextOffset)
+			{
+				return false;
+			}
+			for (size_t Index = 0; Index < Record.PaddingBytes; ++Index)
+			{
+				if (Buffer[NextOffset + Index] != 0)
+				{
+					return false;
+				}
+			}
+			NextOffset += static_cast<size_t>(Record.PaddingBytes);
+			if ((NextOffset - Offset) % FRecord::RecordAlignment != 0)
+			{
+				return false;
+			}
+			Records.push_back(Record);
+			Offset = NextOffset;
+		}
+		return Offset == BytesReturned && Records.size() == Header.TotalCount;
+	}
+
+	std::string FormatFltString(const uint8* Buffer, const Argus::DeviceControl::FStringDescriptor& String)
+	{
+		if (String.Status != Argus::DeviceControl::EStringStatus::Captured)
+		{
+			return std::string("<") + FltStringStatusName(String.Status) + ">";
+		}
+		return FormatProcessText(Buffer, String.Offset, String.Bytes, "");
+	}
+
+	void LogFltCreateRecord(const uint8* Buffer,
+		const Argus::DeviceControl::FFltIrpCreateOperationRecord& Record)
+	{
+		const std::string Path = FormatFltString(Buffer, Record.FilePathName);
+		const std::string CompletionPath = FormatFltString(Buffer, Record.CompletionFilePathName);
+		const std::string Volume = FormatFltString(Buffer, Record.VolumeName);
+		const std::string CompletionVolume = FormatFltString(Buffer, Record.CompletionVolumeName);
+		Log(stdout, static_cast<int64>(Record.ObservedAt), "AUDIT", "file.create",
+			"pid=%u tid=%u mode=%u desired_access=0x%08X disposition=%u "
+			"share=0x%04X attributes=0x%04X completion_status=0x%08X "
+			"close_observed=%u volume_status=%s volume=\"%s\" path_status=%s path=\"%s\" "
+			"completion_volume_status=%s completion_volume=\"%s\" "
+			"completion_path_status=%s completion_path=\"%s\"",
+			Record.RequestorPid, Record.RequestorTid, static_cast<unsigned>(Record.ProcessorMode),
+			Record.FileDesiredAccess, Record.FileDisposition,
+			static_cast<unsigned>(Record.FileSharedAccess), static_cast<unsigned>(Record.FileAttributes),
+			Record.CompletionStatus,
+			Record.bWasIrpClosed ? 1u : 0u,
+			FltStringStatusName(Record.VolumeName.Status), Volume.c_str(),
+			FltStringStatusName(Record.FilePathName.Status), Path.c_str(),
+			FltStringStatusName(Record.CompletionVolumeName.Status), CompletionVolume.c_str(),
+			FltStringStatusName(Record.CompletionFilePathName.Status), CompletionPath.c_str());
+	}
+
 	const char* ProcessPolicyRoleName(Argus::Policy::EPolicyRole Role) noexcept
 	{
 		switch (Role)
@@ -735,6 +861,8 @@ static int RunAgent(HANDLE StopEvent)
 	static_assert(sizeof(ImageSlots) <= MAXDWORD, "IOCTL output size must fit in DWORD");
 	static_assert(RegistryMaxBufferBytes <= MAXDWORD, "Registry IOCTL output size must fit in DWORD");
 	std::vector<uint8> RegistryBuffer(RegistryInitialBufferBytes);
+	static_assert(FltMaxBufferBytes <= MAXDWORD, "Minifilter IOCTL output size must fit in DWORD");
+	std::vector<uint8> FltBuffer(FltInitialBufferBytes);
 	constexpr size_t ObjectBufferBytes = sizeof(Argus::DeviceControl::FObjectOperationNotifyHeader) +
 		static_cast<size_t>(SlotsPerRequest) * sizeof(Argus::DeviceControl::FObjectOperationNotifyRecord);
 	static_assert(ObjectBufferBytes <= MAXDWORD, "Object operation IOCTL output size must fit in DWORD");
@@ -746,6 +874,8 @@ static int RunAgent(HANDLE StopEvent)
 	bool bHasRegistryDropCount = false;
 	uint64 LastObjectDropCount = 0;
 	bool bHasObjectDropCount = false;
+	uint64 LastFltDropCount = 0;
+	bool bHasFltDropCount = false;
 
 	while (!IsStopRequested(StopEvent))
 	{
@@ -1068,6 +1198,90 @@ static int RunAgent(HANDLE StopEvent)
 			if (Header.NextRecordCount == 0)
 			{
 				break;
+			}
+		}
+		for (int32 Batch = 0; Batch < MaxBatchesPerPoll && !IsStopRequested(StopEvent); ++Batch)
+		{
+			Argus::DeviceControl::FFltIrpOperationRP Request{
+				Argus::DeviceControl::FFltIrpOperationHeader::HeaderVersion,
+				static_cast<uint32>(SlotsPerRequest), static_cast<uint32>(SlotsPerRequest),
+				0, Argus::Policy::EMinifilterPolicyOperationFlags::Create
+			};
+			DWORD BytesReturned = 0;
+			if (!DeviceIoControl(Device, Argus::DeviceControl::IoctlCodeFltGetIRPOperations,
+				&Request, static_cast<DWORD>(sizeof(Request)),
+				FltBuffer.data(), static_cast<DWORD>(FltBuffer.size()), &BytesReturned, nullptr))
+			{
+				const DWORD Error = GetLastError();
+				if (Error == ERROR_NO_SYSTEM_RESOURCES)
+				{
+					Log(stderr, 0, "WARN", "ioctl.get_flt_irp_retry", "reason=resources_unavailable");
+					break;
+				}
+				Log(stderr, 0, "ERROR", "ioctl.get_flt_irp_failed", "win32=%lu", Error);
+				CloseHandle(Device);
+				return 1;
+			}
+			if (BytesReturned > FltBuffer.size())
+			{
+				Log(stderr, 0, "ERROR", "ioctl.get_flt_irp_failed",
+					"reason=invalid_byte_count bytes=%lu", BytesReturned);
+				CloseHandle(Device);
+				return 1;
+			}
+
+			Argus::DeviceControl::FFltIrpOperationHeader Header{};
+			std::vector<Argus::DeviceControl::FFltIrpCreateOperationRecord> Records;
+			if (!ParseFltCreateBatch(FltBuffer.data(), BytesReturned, Request, Header, Records))
+			{
+				Log(stderr, 0, "ERROR", "ioctl.get_flt_irp_failed",
+					"reason=invalid_payload bytes=%lu", BytesReturned);
+				CloseHandle(Device);
+				return 1;
+			}
+			for (const auto& Record : Records)
+			{
+				LogFltCreateRecord(FltBuffer.data(), Record);
+			}
+			if (!bHasFltDropCount)
+			{
+				if (Header.DropCount != 0)
+				{
+					Log(stderr, 0, "WARN", "file.drop", "total=%llu",
+						static_cast<unsigned long long>(Header.DropCount));
+				}
+				bHasFltDropCount = true;
+			}
+			else if (Header.DropCount > LastFltDropCount)
+			{
+				Log(stderr, 0, "WARN", "file.drop", "delta=%llu total=%llu",
+					static_cast<unsigned long long>(Header.DropCount - LastFltDropCount),
+					static_cast<unsigned long long>(Header.DropCount));
+			}
+			else if (Header.DropCount < LastFltDropCount)
+			{
+				Log(stderr, 0, "WARN", "file.drop_counter_reset",
+					"previous_total=%llu current_total=%llu",
+					static_cast<unsigned long long>(LastFltDropCount),
+					static_cast<unsigned long long>(Header.DropCount));
+			}
+			LastFltDropCount = Header.DropCount;
+			if (Header.NextRecordCount == 0)
+			{
+				break;
+			}
+			if (Records.empty())
+			{
+				if (FltBuffer.size() == FltMaxBufferBytes)
+				{
+					Log(stderr, 0, "ERROR", "ioctl.get_flt_irp_failed",
+						"reason=record_exceeds_buffer buffer_bytes=%zu pending=%u",
+						FltBuffer.size(), Header.NextRecordCount);
+					CloseHandle(Device);
+					return 1;
+				}
+				const size_t DoubledSize = FltBuffer.size() * 2;
+				FltBuffer.resize(DoubledSize < FltMaxBufferBytes ? DoubledSize : FltMaxBufferBytes);
 			}
 		}
 		if (StopEvent != nullptr)

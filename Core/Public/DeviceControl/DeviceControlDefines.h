@@ -50,6 +50,6 @@ namespace Argus::DeviceControl
 	inline constexpr uint32 IoctlCodeFltUnregisterProcess
 		= CTL_CODE(FILE_DEVICE_UNKNOWN, 0x821, METHOD_BUFFERED, FILE_READ_ACCESS);
 
-	inline constexpr uint32 IoctlCodeFltGetFileOperations
+	inline constexpr uint32 IoctlCodeFltGetIRPOperations
 		= CTL_CODE(FILE_DEVICE_UNKNOWN, 0x822, METHOD_OUT_DIRECT, FILE_READ_ACCESS);
 }

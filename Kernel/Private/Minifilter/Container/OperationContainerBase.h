@@ -79,7 +79,7 @@ public:
 	typedef TGuard<false> FWriteGuard;
 
 private:
-	FLockType Lock;
+	mutable FLockType Lock;
 };
 
 template <>
@@ -142,5 +142,5 @@ protected:
 	typedef typename FLockType::FReadGuard  FReadGuard;
 	typedef typename FLockType::FWriteGuard FWriteGuard;
 
-	FLockType Lock;
+	mutable FLockType Lock;
 };

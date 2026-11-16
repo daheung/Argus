@@ -8,8 +8,8 @@ namespace Argus::Policy
 	enum class EMinifilterPolicySource: uint8
 	{
 		None,
-		ProtectedProcessAssets,
-		ArgusProcessAssets,
+		ProtectedAssets,
+		ArgusAssets,
 		ExplicitAssets,
 	};
 
@@ -40,6 +40,22 @@ namespace Argus::Policy
 		SetInformatin		= 1u << 7,
 		SetSecurity			= 1u << 8,
 	};
+
+	constexpr EMinifilterPolicyOperationFlags operator~(const EMinifilterPolicyOperationFlags& Flags) noexcept
+	{
+		return static_cast<EMinifilterPolicyOperationFlags>(~static_cast<uint32>(Flags));
+	}
+
+	constexpr EMinifilterPolicyOperationFlags operator&(const EMinifilterPolicyOperationFlags& Lhs, const EMinifilterPolicyOperationFlags& Rhs) noexcept
+	{
+		return static_cast<EMinifilterPolicyOperationFlags>(static_cast<uint32>(Lhs) & static_cast<uint32>(Rhs));
+	}
+
+	constexpr EMinifilterPolicyOperationFlags& operator|=(EMinifilterPolicyOperationFlags& Lhs, const EMinifilterPolicyOperationFlags& Rhs) noexcept
+	{
+		Lhs = static_cast<EMinifilterPolicyOperationFlags>(static_cast<uint32>(Lhs) | static_cast<uint32>(Rhs));
+		return Lhs;
+	}
 
 	enum class EVolumeDescriptorFields : uint32
 	{

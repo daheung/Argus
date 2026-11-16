@@ -1,6 +1,9 @@
 #include "Kernel/Private/Minifilter/Operation/CreateOperation.h"
+#include "Kernel/Private/Minifilter/MinifilterTypes.h"
 #include "Kernel/Private/DriverContext.h"
 #include "Kernel/Private/Minifilter/Minifilter.h"
+#include "Kernel/Public/Misc/KernelMisc.h"
+
 
 namespace
 {
@@ -88,11 +91,6 @@ namespace
 		}
 	}
 
-	struct FCreateCompletionContext
-	{
-		Argus::Minifilter::FCreateOperationDescriptor Descriptor;
-	};
-
 	NTSTATUS FailureStatus(NTSTATUS RequestedStatus) noexcept
 	{
 		return NT_SUCCESS(RequestedStatus) ? STATUS_ACCESS_DENIED : RequestedStatus;
@@ -111,8 +109,13 @@ namespace
 		const auto& Create = CallbackData->Iopb->Parameters.Create;
 		const ULONG Options = Create.Options;
 
-		Descriptor.RequestorPid = FltGetRequestorProcessId(CallbackData);
 		KeQuerySystemTime(&Descriptor.ObservedAt);
+		Descriptor.RequestorPid = FltGetRequestorProcessId(CallbackData);
+		if (CallbackData->Thread != nullptr)
+		{
+			Descriptor.RequestorTid = HandleToULong(PsGetThreadId(CallbackData->Thread));
+		}
+		Descriptor.ProcessorMode = ProcessorModeFrom(CallbackData->RequestorMode);
 		Descriptor.OperationFlags = CallbackData->Iopb->OperationFlags;
 		Descriptor.SharedAccess = Create.ShareAccess;
 		Descriptor.Attribute = Create.FileAttributes;
@@ -173,7 +176,7 @@ namespace
 
 	VOID FLTAPI CompleteDeferredPost(PFLT_DEFERRED_IO_WORKITEM WorkItem, PFLT_CALLBACK_DATA CallbackData, PVOID WorkerContext)
 	{
-		auto* Context = static_cast<FCreateCompletionContext*>(WorkerContext);
+		auto* Context = static_cast<Argus::Minifilter::FCreateOperationDescriptor*>(WorkerContext);
 		if (Context != nullptr)
 		{
 			DestructItem(Context);
@@ -186,10 +189,7 @@ namespace
 }
 
 FLT_PREOP_CALLBACK_STATUS FCreateOperation::OnPreOperationCallback(
-	FMinifilter& Filter,
-	PFLT_CALLBACK_DATA CallbackData,
-	PCFLT_RELATED_OBJECTS FltObjects,
-	PVOID* CompletionContext) noexcept
+	FMinifilter& Filter, PFLT_CALLBACK_DATA CallbackData, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext) noexcept
 {
 	UNREFERENCED_PARAMETER(FltObjects);
 	*CompletionContext = nullptr;
@@ -232,11 +232,7 @@ Argus::Minifilter::FCreatePreOperationDecision FCreateOperation::FRules::ApplyPr
 }
 
 FLT_POSTOP_CALLBACK_STATUS FCreateOperation::OnPostOperationCallback(
-	FMinifilter& Filter,
-	PFLT_CALLBACK_DATA CallbackData,
-	PCFLT_RELATED_OBJECTS FltObjects,
-	void* CompletionContext,
-	FLT_POST_OPERATION_FLAGS Flags) noexcept
+	FMinifilter& Filter, PFLT_CALLBACK_DATA CallbackData, PCFLT_RELATED_OBJECTS FltObjects, void* CompletionContext, FLT_POST_OPERATION_FLAGS Flags) noexcept
 {
 	auto* Context = static_cast<Argus::Minifilter::FCreateOperationDescriptor*>(CompletionContext);
 	if (FlagOn(Flags, FLTFL_POST_OPERATION_DRAINING))
@@ -309,6 +305,7 @@ FLT_PREOP_CALLBACK_STATUS FCreateOperation::OnPreOperationFilterActiveCallback(
 			ReleaseCreateContext(Context);
 			return CompletePreWithStatus(CallbackData, STATUS_INSUFFICIENT_RESOURCES);
 		}
+
 		const NTSTATUS Status = FltQueueDeferredIoWorkItem(
 			WorkItem, CallbackData, OnPreOperationDeferredCallback, DelayedWorkQueue, Context);
 		if (!NT_SUCCESS(Status))
@@ -342,6 +339,8 @@ FLT_POSTOP_CALLBACK_STATUS FCreateOperation::OnPostOperationFilterPassiveCallbac
 	Descriptor.CompletionStatus = CallbackData->IoStatus.Status;
 	if (NT_SUCCESS(Descriptor.CompletionStatus) && Descriptor.CompletionStatus != STATUS_REPARSE)
 	{
+		Descriptor.OperationId = Filter.AttachStreamHandleContext(CallbackData, FltObjects, Descriptor);
+
 		CaptureVolumeName(FltObjects != nullptr ? FltObjects->Volume : nullptr,
 			Descriptor.CompletionVolumeName, Descriptor.CompletionVolumeNameStatus);
 		CaptureFilePathName(CallbackData, FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT,

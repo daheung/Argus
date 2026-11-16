@@ -1,5 +1,7 @@
 #include "Kernel/Private/Minifilter/Minifilter.h"
+#include "Kernel/Private/Minifilter/MinifilterTypes.h"
 #include "Kernel/Private/Minifilter/Operation/CreateOperation.h"
+#include "Kernel/Private/Minifilter/Operation/CloseOperation.h"
 #include "Kernel/Private/DriverContext.h"
 
 #include <fltKernel.h>
@@ -123,10 +125,9 @@ namespace
 		return PrePassThrough(Data, FltObjects, CompletionContext);
 	}
 
-	FLT_PREOP_CALLBACK_STATUS FLTAPI PreClose(
-		PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext)
+	FLT_PREOP_CALLBACK_STATUS FLTAPI PreClose(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext)
 	{
-		return PrePassThrough(Data, FltObjects, CompletionContext);
+		return FCloseOperation::OnPreOperationCallback(GDriverContext->GetMinifilter(), Data, FltObjects, CompletionContext);
 	}
 
 	FLT_PREOP_CALLBACK_STATUS FLTAPI PreFlushBuffers(
@@ -196,12 +197,17 @@ namespace
 		{ IRP_MJ_ACQUIRE_FOR_SECTION_SYNCHRONIZATION, 0, PreAcquireForSectionSynchronization, nullptr },
 		{ IRP_MJ_OPERATION_END },
 	};
+	const FLT_CONTEXT_REGISTRATION Contexts[] =
+	{
+		{ FLT_STREAMHANDLE_CONTEXT, 0, nullptr, sizeof(Argus::Minifilter::FMinifilterContext), 'CtFk' },
+		{ FLT_CONTEXT_END },
+	};
 	const FLT_REGISTRATION Registration =
 	{
 		sizeof(FLT_REGISTRATION),
 		FLT_REGISTRATION_VERSION,
 		FLTFL_REGISTRATION_SUPPORT_NPFS_MSFS,
-		nullptr,
+		Contexts,
 		Operations,
 		Driver::ArgusFilterUnload,
 		InstanceSetup,
@@ -292,4 +298,95 @@ NTSTATUS FMinifilter::SetFilterMode(EFilterMode NewMode) noexcept
 		return STATUS_DEVICE_NOT_READY;
 	}
 	return STATUS_SUCCESS;
+}
+
+uint64 FMinifilter::AttachStreamHandleContext(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS Objects, const Argus::Minifilter::FCreateOperationDescriptor& Descriptor) noexcept
+{
+	if (Objects == nullptr || Objects->FileObject == nullptr)
+	{
+		return 0;
+	}
+	if (!FltSupportsStreamHandleContexts(Objects->FileObject))
+	{
+		return 0;
+	}
+
+	PFLT_CONTEXT RawContext = nullptr;
+	const NTSTATUS AllocateStatus = FltAllocateContext(Objects->Filter, FLT_STREAMHANDLE_CONTEXT, sizeof(Argus::Minifilter::FMinifilterContext), NonPagedPoolNx, &RawContext);
+	if (!NT_SUCCESS(AllocateStatus))
+	{
+		return 0;
+	}
+
+	auto* Context = static_cast<Argus::Minifilter::FMinifilterContext*>(RawContext);
+	RtlZeroMemory(Context, sizeof(*Context));
+
+	Context->ContextId = static_cast<uint64>(NextOperationId.fetch_add(1, Atomic::EMemoryOrder::Acquire));
+	Context->ContextProcessId = Descriptor.RequestorPid;
+	Context->ContextCreatedAt = Descriptor.ObservedAt.QuadPart;
+
+	PEPROCESS Process = FltGetRequestorProcess(Data);
+	if (Process != nullptr)
+	{
+		Context->ContextProcessCreatedAt = PsGetProcessCreateTimeQuadPart(Process);
+	}
+
+	const NTSTATUS SetStatus = FltSetStreamHandleContext(Objects->Instance, Objects->FileObject, FLT_SET_CONTEXT_KEEP_IF_EXISTS, RawContext, nullptr);
+	uint64 OperationId = NT_SUCCESS(SetStatus) ? Context->ContextId : 0;
+
+	if (SetStatus == STATUS_FLT_CONTEXT_ALREADY_DEFINED)
+	{
+		PFLT_CONTEXT Existing = nullptr;
+		const bool bGetContextSucceed = NT_SUCCESS(FltGetStreamHandleContext(Objects->Instance, Objects->FileObject, &Existing));
+		if (bGetContextSucceed)
+		{
+			OperationId = static_cast<Argus::Minifilter::FMinifilterContext*>(Existing)->ContextId;
+			FltReleaseContext(Existing);
+		}
+	}
+
+	FltReleaseContext(RawContext);
+	return OperationId;
+}
+
+NTSTATUS FMinifilter::ReadStreamHandleContext(PCFLT_RELATED_OBJECTS Objects, Argus::Minifilter::FMinifilterContext& OutContext) noexcept
+{
+	OutContext = {};
+
+	if (Objects == nullptr || Objects->Instance == nullptr || Objects->FileObject == nullptr)
+	{
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	PFLT_CONTEXT RawContext = nullptr;
+	const NTSTATUS Status = FltGetStreamHandleContext(Objects->Instance, Objects->FileObject, &RawContext);
+	if (!NT_SUCCESS(Status))
+	{
+		return Status;
+	}
+
+	OutContext = *static_cast<Argus::Minifilter::FMinifilterContext*>(RawContext);
+	FltReleaseContext(RawContext);
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS FMinifilter::WriteStreamHandleContext(PCFLT_RELATED_OBJECTS Objects, const Argus::Minifilter::FMinifilterContext& InContext) noexcept
+{
+	if (Objects == nullptr || Objects->Filter == nullptr || Objects->Instance == nullptr || Objects->FileObject == nullptr)
+	{
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	PFLT_CONTEXT RawContext = nullptr;
+	const NTSTATUS AllocateStatus = FltAllocateContext(Objects->Filter, FLT_STREAMHANDLE_CONTEXT, sizeof(Argus::Minifilter::FMinifilterContext), NonPagedPoolNx, &RawContext);
+	if (!NT_SUCCESS(AllocateStatus))
+	{
+		return AllocateStatus;
+	}
+
+	*static_cast<Argus::Minifilter::FMinifilterContext*>(RawContext) = InContext;
+
+	const NTSTATUS SetStatus = FltSetStreamHandleContext(Objects->Instance, Objects->FileObject, FLT_SET_CONTEXT_REPLACE_IF_EXISTS, RawContext, nullptr);
+	FltReleaseContext(RawContext);
+	return SetStatus;
 }

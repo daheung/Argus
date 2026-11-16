@@ -361,10 +361,47 @@ public:
 		return true;
 	}
 
+	// Removes the oldest matching element while preserving the order of the rest.
+	// OutElement must not refer to an element in this queue. A failed search leaves
+	// it unchanged. Pred must only inspect the element and must not access this queue.
 	template <typename Predicate>
-	FORCEINLINE SizeType TryPopByPredicate(Predicate&& Pred, TArray<PoolType, ElementType>& OutArray) noexcept
+	NODISCARD FORCEINLINE bool TryPopByPredicate(Predicate&& Pred, ElementType& OutElement) noexcept
 	{
-		return 0;
+		if (QueueMax == 0)
+		{
+			return false;
+		}
+
+		const SizeType Tail = TailIndex.load(Atomic::EMemoryOrder::Relaxed);
+		const SizeType Head = HeadIndex.load(Atomic::EMemoryOrder::Acquire);
+		for (SizeType Index = Tail; Index != Head; Index = NextIndex(Index))
+		{
+			ElementType* Slot = &GetElements()[Index];
+			if (!(::Invoke(Pred, static_cast<const ElementType&>(*Slot))))
+			{
+				continue;
+			}
+
+			DestructItem(&OutElement);
+			ConstructItem(&OutElement, MoveTempIfPossible(*Slot));
+			DestructItem(Slot);
+
+			// Move the prefix toward the removed slot. The producer owns HeadIndex;
+			// only the consumer's TailIndex changes after every move is complete.
+			for (SizeType Hole = Index; Hole != Tail;)
+			{
+				const SizeType Previous = Hole == 0 ? QueueMax : Hole - 1;
+				ElementType* PreviousSlot = &GetElements()[Previous];
+				ConstructItem(&GetElements()[Hole], MoveTempIfPossible(*PreviousSlot));
+				DestructItem(PreviousSlot);
+				Hole = Previous;
+			}
+
+			TailIndex.store(NextIndex(Tail), Atomic::EMemoryOrder::Release);
+			return true;
+		}
+
+		return false;
 	}
 
 	NODISCARD FORCEINLINE bool IsEmpty() const noexcept

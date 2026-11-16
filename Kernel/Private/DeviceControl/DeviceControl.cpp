@@ -1,4 +1,5 @@
 #include "Kernel/Private/DeviceControl/DeviceControl.h"
+#include "Kernel/Public/Misc/KernelMisc.h"
 #include "Core/Public/DeviceControl/DeviceControlDefines.h"
 #include "Core/Public/DeviceControl/Protocols/ProcessNotifyProtocol.h"
 #include "Core/Public/DeviceControl/Protocols/ThreadNotifyProtocol.h"
@@ -8,6 +9,7 @@
 #include "Core/Public/DeviceControl/Protocols/RegisterAgentProtocol.h"
 #include "Core/Public/DeviceControl/Protocols/RegisterProcessProtocol.h"
 #include "Core/Public/DeviceControl/Protocols/RegisterIsolationProtocol.h"
+#include "Core/Public/DeviceControl/Protocols/FltGetIrpOperationProtocol.h"
 #include "Core/Public/Memory/MemoryUtils.h"
 #include "Kernel/Private/DriverContext.h"
 #include "Kernel/Private/Logging.h"
@@ -70,6 +72,11 @@
  *     The actual response count includes only records successfully removed
  *     from the queue and written to the output buffer.
  */
+
+namespace
+{
+
+}
 
 extern FDriverContext* GDriverContext;
 extern "C" UCHAR* PsGetProcessImageFileName(PEPROCESS Process);
@@ -910,6 +917,288 @@ NTSTATUS DeviceControlRegisterIsolationProcess(FDriverContext* Context, PDEVICE_
 	return STATUS_SUCCESS;
 }
 
+static uint64 CapturedFltStringBytes(const FString<>& Text, Argus::Minifilter::EOperationStringStatus Status) noexcept
+{
+	return Status == Argus::Minifilter::EOperationStringStatus::Captured
+		? static_cast<uint64>(Text.Len()) * sizeof(FString<>::ElementType) : 0;
+}
+
+static void WriteFltString(uint8* OutputBuffer, uint64 Offset, const FString<>& Text,
+	Argus::Minifilter::EOperationStringStatus Status, Argus::DeviceControl::FStringDescriptor& Wire) noexcept
+{
+	switch (Status)
+	{
+	case Argus::Minifilter::EOperationStringStatus::Captured:
+		Wire.Status = Argus::DeviceControl::EStringStatus::Captured;
+		break;
+	case Argus::Minifilter::EOperationStringStatus::Unavailable:
+		Wire.Status = Argus::DeviceControl::EStringStatus::Unavailable;
+		break;
+	case Argus::Minifilter::EOperationStringStatus::AllocationFailed:
+		Wire.Status = Argus::DeviceControl::EStringStatus::AllocationFailed;
+		break;
+	default:
+		Wire.Status = Argus::DeviceControl::EStringStatus::NotApplicable;
+		break;
+	}
+	Wire.Offset = Offset;
+	Wire.Bytes = CapturedFltStringBytes(Text, Status);
+	if (Wire.Bytes != 0)
+	{
+		RtlCopyMemory(OutputBuffer + Offset, Text.GetCharArray().GetData(), Wire.Bytes);
+	}
+}
+
+template <typename ContainerType>
+void CalCulateNextNumAndBytes(const ContainerType& Container, uint32 ProcessId, uint32 Max,
+	uint32& NextNum, uint64& NextBytes) noexcept;
+
+template <>
+void CalCulateNextNumAndBytes<FCreateOperationContainer>(const FCreateOperationContainer& Container, uint32 ProcessId,
+	uint32 Max, uint32& NextNum, uint64& NextBytes) noexcept
+{
+	uint32 NewNextNum   = NextNum;
+	uint64 NewNextBytes = NextBytes;
+
+	typedef typename FCreateOperationContainer::DescriptorType DescriptorType;
+	Container.ForEach([ProcessId, Max, &NewNextNum, &NewNextBytes](const DescriptorType& Descriptor, uint32) -> bool {
+		if (ProcessId != 0 && Descriptor.RequestorPid != ProcessId)
+		{
+			return true;
+		}
+		if (NewNextNum >= Max)
+		{
+			/* Stop iteration. */
+			return false;
+		}
+
+		constexpr uint64 RecordHeaderBytes = static_cast<uint64>(sizeof(Argus::DeviceControl::FFltIrpCreateOperationRecord));
+		const uint64 VolumeNameBytes			 = CapturedFltStringBytes(Descriptor.VolumeName			   , Descriptor.VolumeNameStatus);
+		const uint64 FilePathNameBytes			 = CapturedFltStringBytes(Descriptor.FilePathName		   , Descriptor.FilePathNameStatus);
+		const uint64 CompletionVolumeNameBytes	 = CapturedFltStringBytes(Descriptor.CompletionVolumeName  , Descriptor.CompletionVolumeNameStatus);
+		const uint64 CompletionFilePathNameBytes = CapturedFltStringBytes(Descriptor.CompletionFilePathName, Descriptor.CompletionFilePathNameStatus);
+		const uint64 RawRecordBytes = RecordHeaderBytes + VolumeNameBytes + FilePathNameBytes + CompletionVolumeNameBytes + CompletionFilePathNameBytes;
+		const uint64 RecordBytes	= static_cast<uint64>(AlignUp(RawRecordBytes, Argus::DeviceControl::FFltIrpCreateOperationRecord::RecordAlignment));
+
+		NewNextNum += 1;
+		NewNextBytes += RecordBytes;
+
+		/* Keep iteration. */
+		return true;
+	});
+
+	NextNum   = NewNextNum;
+	NextBytes = NewNextBytes;
+}
+
+NTSTATUS DeviceControlGetIrpOperation(FDriverContext* Context, PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	Irp->IoStatus.Information = 0;
+
+	if (Context == nullptr)
+	{
+		return STATUS_DEVICE_NOT_READY;
+	}
+
+	PEPROCESS Process = IoGetRequestorProcess(Irp);
+	if (Process == nullptr)
+	{
+		return STATUS_ACCESS_DENIED;
+	}
+	if (!Context->GetAgentState().IsAgentProcess(Process))
+	{
+		return STATUS_ACCESS_DENIED;
+	}
+
+	auto* InputBuffer = static_cast<uint8*>(Irp->AssociatedIrp.SystemBuffer);
+	if (InputBuffer == nullptr)
+	{
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	PMDL MdlBuffer = Irp->MdlAddress;
+	if (MdlBuffer == nullptr)
+	{
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	auto* OutputBuffer = static_cast<uint8*>(MmGetSystemAddressForMdlSafe(MdlBuffer, LowPagePriority));
+	if (OutputBuffer == nullptr)
+	{
+		return STATUS_INSUFFICIENT_RESOURCES;
+	}
+
+	const auto* IrpSp = IoGetCurrentIrpStackLocation(Irp);
+	const uint32 InputBufferLength = IrpSp->Parameters.DeviceIoControl.InputBufferLength;
+	const uint32 OutputBufferLength = MmGetMdlByteCount(Irp->MdlAddress);
+
+	constexpr uint32 HeaderBytes = sizeof(Argus::DeviceControl::FFltIrpOperationHeader);
+	if (OutputBufferLength < HeaderBytes)
+	{
+		return STATUS_BUFFER_TOO_SMALL;
+	}
+	if (InputBufferLength < sizeof(Argus::DeviceControl::FFltIrpOperationRP))
+	{
+		return STATUS_INVALID_BUFFER_SIZE;
+	}
+
+	Argus::DeviceControl::FFltIrpOperationRP RequestPacket{};
+	{
+		auto* TmpRp = static_cast<Argus::DeviceControl::FFltIrpOperationRP*>((void*)InputBuffer);
+		if (TmpRp == nullptr)
+		{
+			return STATUS_INVALID_PARAMETER;
+		}
+		if (TmpRp->Version != Argus::DeviceControl::FFltIrpOperationHeader::HeaderVersion)
+		{
+			return STATUS_REVISION_MISMATCH;
+		}
+
+		RequestPacket.Version		  = TmpRp->Version;
+		RequestPacket.CurRecordCount  = TmpRp->CurRecordCount;
+		RequestPacket.NextRecordCount = TmpRp->NextRecordCount;
+		RequestPacket.ProcessId		  = TmpRp->ProcessId;
+		RequestPacket.OperationFlgs   = TmpRp->OperationFlgs;
+	}
+
+	FMinifilter& Minifilter = Context->GetMinifilter();
+	FMinifilterContainer& MinifilterContainer = Minifilter.GetOperationContainer();
+
+	/**
+	 * [BatchHeader]
+	 * [Record 1] [VolumeName UTF-16] [FilePathName UTF-16] [CompletionVolumeName UTF-16] [CompletionFilePathName UTF-16] [Padding]
+	 * [Record 2] [VolumeName UTF-16] [FilePathName UTF-16] [CompletionVolumeName UTF-16] [CompletionFilePathName UTF-16] [Padding]
+	 * ...
+	 */
+
+	uint32 NumWrite = 0;
+	uint64 NumWriteOffset = HeaderBytes;
+	{
+		auto& CreateContainer = MinifilterContainer.Get<Argus::Minifilter::EOperation::Create>();
+		auto& CloseContainer  = MinifilterContainer.Get<Argus::Minifilter::EOperation::Close >();
+
+		const bool bRequestCreate = static_cast<bool>(
+			RequestPacket.OperationFlgs & Argus::Policy::EMinifilterPolicyOperationFlags::Create);
+		for (; bRequestCreate && NumWrite < RequestPacket.CurRecordCount; ++NumWrite)
+		{
+			if (CreateContainer.IsEmpty())
+			{
+				break;
+			}
+
+			constexpr uint64 RecordHeaderBytes = static_cast<uint64>(sizeof(Argus::DeviceControl::FFltIrpCreateOperationRecord));
+
+			Argus::Minifilter::FCreateOperationDescriptor CreateOpDescriptor{};
+			bool bPopSucceed = CreateContainer.TryPopByPredicate([RequestPacket, OutputBufferLength, NumWriteOffset](const decltype(CreateOpDescriptor)& Descriptor) -> bool {
+				const uint64 VolumeNameBytes			 = CapturedFltStringBytes(Descriptor.VolumeName			   , Descriptor.VolumeNameStatus);
+				const uint64 FilePathNameBytes			 = CapturedFltStringBytes(Descriptor.FilePathName		   , Descriptor.FilePathNameStatus);
+				const uint64 CompletionVolumeNameBytes	 = CapturedFltStringBytes(Descriptor.CompletionVolumeName  , Descriptor.CompletionVolumeNameStatus);
+				const uint64 CompletionFilePathNameBytes = CapturedFltStringBytes(Descriptor.CompletionFilePathName, Descriptor.CompletionFilePathNameStatus);
+				const uint64 RawRecordBytes = RecordHeaderBytes + VolumeNameBytes + FilePathNameBytes + CompletionVolumeNameBytes + CompletionFilePathNameBytes;
+				const uint64 RecordBytes	= static_cast<uint64>(AlignUp(RawRecordBytes, Argus::DeviceControl::FFltIrpCreateOperationRecord::RecordAlignment));
+
+				const bool bIsSlackEnough = NumWriteOffset <= OutputBufferLength && RecordBytes <= static_cast<uint64>(OutputBufferLength) - NumWriteOffset;
+				const bool bIsRequestorProcess = Descriptor.RequestorPid == RequestPacket.ProcessId;
+				const bool bIsTargetProcess = RequestPacket.ProcessId == 0 || bIsRequestorProcess;
+				return bIsTargetProcess && bIsSlackEnough;
+			}, CreateOpDescriptor);
+
+			if (!bPopSucceed)
+			{
+				break;
+			}
+
+			Argus::DeviceControl::FFltIrpCreateOperationRecord Record{};
+			const uint64 VolumeNameBytes			 = CapturedFltStringBytes(CreateOpDescriptor.VolumeName, CreateOpDescriptor.VolumeNameStatus);
+			const uint64 FilePathNameBytes			 = CapturedFltStringBytes(CreateOpDescriptor.FilePathName, CreateOpDescriptor.FilePathNameStatus);
+			const uint64 CompletionVolumeNameBytes	 = CapturedFltStringBytes(CreateOpDescriptor.CompletionVolumeName, CreateOpDescriptor.CompletionVolumeNameStatus);
+			const uint64 CompletionFilePathNameBytes = CapturedFltStringBytes(CreateOpDescriptor.CompletionFilePathName, CreateOpDescriptor.CompletionFilePathNameStatus);
+
+			const uint64 RawRecordBytes = RecordHeaderBytes + VolumeNameBytes + FilePathNameBytes + CompletionVolumeNameBytes + CompletionFilePathNameBytes;
+			const uint64 RecordBytes  = static_cast<uint64>(AlignUp(RawRecordBytes, Argus::DeviceControl::FFltIrpCreateOperationRecord::RecordAlignment));
+			const uint64 PaddingBytes = static_cast<uint64>(RecordBytes - RawRecordBytes);
+
+			const uint64 VolumeNameOffset	= static_cast<uint64>(NumWriteOffset + RecordHeaderBytes);
+			const uint64 FilePathNameOffset = static_cast<uint64>(NumWriteOffset + RecordHeaderBytes + VolumeNameBytes);
+			const uint64 CompletionVolumeNameOffset = FilePathNameOffset + FilePathNameBytes;
+			const uint64 CompletionFilePathNameOffset = CompletionVolumeNameOffset + CompletionVolumeNameBytes;
+
+			Record.OperationFlags		   = Argus::Policy::EMinifilterPolicyOperationFlags::Create;
+			Record.RequestorPid			   = CreateOpDescriptor.RequestorPid;
+			Record.RequestorTid			   = CreateOpDescriptor.RequestorTid;
+			Record.ProcessorMode		   = ProcessorModeTo(CreateOpDescriptor.ProcessorMode);
+			Record.ObservedAt			   = CreateOpDescriptor.ObservedAt.QuadPart;
+			Record.FileOperationFlags	   = CreateOpDescriptor.OperationFlags;
+			Record.FileSharedAccess		   = CreateOpDescriptor.SharedAccess;
+			Record.FileAttributes		   = CreateOpDescriptor.Attribute;
+			Record.FileDisposition		   = CreateOpDescriptor.Disposition;
+			Record.FileDesiredAccess	   = CreateOpDescriptor.DesiredAccess;
+			Record.PreOperationDecision	   = PreDecisionTo(CreateOpDescriptor.PreOperationDecision);
+			Record.PostOperationDecision   = PostDecisionTo(CreateOpDescriptor.PostOperationDecision);
+			Record.InternalCallCount	   = CreateOpDescriptor.InternalAttemptedCount;
+			Record.CompletionInformation   = CreateOpDescriptor.CompletionInformation;
+			Record.CompletionStatus		   = static_cast<uint32>(CreateOpDescriptor.CompletionStatus);
+			Record.bIsSynchronous		   = CreateOpDescriptor.bSynchronous;
+			Record.bIsDirectoryRequired    = CreateOpDescriptor.bDirectoryRequired;
+			Record.bIsNonDirectoryRequired = CreateOpDescriptor.bNonDirectoryRequired;
+			Record.bIsNonCached			   = CreateOpDescriptor.bNonCached;
+			Record.bIsSequential		   = CreateOpDescriptor.bSequential;
+			Record.bIsRandomAccess		   = CreateOpDescriptor.bRandomAccess;
+			Record.bIsWriteThrough		   = CreateOpDescriptor.bWriteThrough;
+			Record.bIsDeleteOnClose		   = CreateOpDescriptor.bDeleteOnClose;
+			Record.bIsOpenByFileId		   = CreateOpDescriptor.bOpenByFileId;
+			Record.bIsOpenReparsePoint	   = CreateOpDescriptor.bOpenReparsePoint;
+			Record.PaddingBytes			   = PaddingBytes;
+
+			WriteFltString(OutputBuffer, VolumeNameOffset			 , CreateOpDescriptor.VolumeName			, CreateOpDescriptor.VolumeNameStatus			 , Record.VolumeName);
+			WriteFltString(OutputBuffer, FilePathNameOffset			 , CreateOpDescriptor.FilePathName			, CreateOpDescriptor.FilePathNameStatus			 , Record.FilePathName);
+			WriteFltString(OutputBuffer, CompletionVolumeNameOffset  , CreateOpDescriptor.CompletionVolumeName	, CreateOpDescriptor.CompletionVolumeNameStatus	 , Record.CompletionVolumeName);
+			WriteFltString(OutputBuffer, CompletionFilePathNameOffset, CreateOpDescriptor.CompletionFilePathName, CreateOpDescriptor.CompletionFilePathNameStatus, Record.CompletionFilePathName);
+
+			Argus::Minifilter::FCloseOperationDescriptor CloseOpDescriptor{};
+			bool bCloseOpPopSucceed = CloseContainer.TryPopByPredicate([&CreateOpDescriptor](const decltype(CloseOpDescriptor)& Descriptor) -> bool {
+				return Descriptor.OperationId == CreateOpDescriptor.OperationId;
+			}, CloseOpDescriptor);
+
+			if (bCloseOpPopSucceed)
+			{
+				Record.bWasIrpClosed = true;
+			}
+			if (PaddingBytes != 0)
+			{
+				RtlZeroMemory(OutputBuffer + NumWriteOffset + RawRecordBytes, PaddingBytes);
+			}
+
+			RtlCopyMemory(&OutputBuffer[NumWriteOffset], &Record, RecordHeaderBytes);
+			NumWriteOffset += RecordBytes;
+		}
+	}
+
+	uint32 NextNum	 = 0;
+	uint64 NextBytes = 0;
+	uint64 DropCount = 0;
+	if (static_cast<bool>(RequestPacket.OperationFlgs & Argus::Policy::EMinifilterPolicyOperationFlags::Create))
+	{
+		const auto& Container = MinifilterContainer.Get<Argus::Minifilter::EOperation::Create>();
+		CalCulateNextNumAndBytes(Container, RequestPacket.ProcessId, RequestPacket.NextRecordCount, NextNum, NextBytes);
+		DropCount += Container.GetDroppedCount();
+	}
+
+	Argus::DeviceControl::FFltIrpOperationHeader Header{};
+	Header.Version = Argus::DeviceControl::FFltIrpOperationHeader::HeaderVersion;
+	Header.HeaderBytes = HeaderBytes;
+	Header.TotalCount = NumWrite;
+	Header.TotalBytes = NumWriteOffset;
+	Header.DropCount = DropCount;
+	Header.NextRecordCount = NextNum;
+	Header.NextRecordBytes = NextBytes;
+	RtlCopyMemory(OutputBuffer, &Header, sizeof(Argus::DeviceControl::FFltIrpOperationHeader));
+
+	Irp->IoStatus.Information = static_cast<ULONG_PTR>(NumWriteOffset);
+	return STATUS_SUCCESS;
+}
+
 namespace Driver
 {
 	NTSTATUS ArgusDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
@@ -943,6 +1232,9 @@ namespace Driver
 			break;
 		case Argus::DeviceControl::IoctlCodeRegisterIsocationProcess:
 			Status = DeviceControlRegisterIsolationProcess(GDriverContext, DeviceObject, Irp);
+			break;
+		case Argus::DeviceControl::IoctlCodeFltGetIRPOperations:
+			Status = DeviceControlGetIrpOperation(GDriverContext, DeviceObject, Irp);
 			break;
 		default:
 			break;

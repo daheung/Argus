@@ -24,3 +24,5 @@ NTSTATUS DeviceControlRegisterAgent(FDriverContext* Context, PDEVICE_OBJECT Devi
 NTSTATUS DeviceControlRegisterProcess(FDriverContext* Context, PDEVICE_OBJECT DeviceObject, PIRP Irp);
 
 NTSTATUS DeviceControlRegisterIsolationProcess(FDriverContext* Context, PDEVICE_OBJECT DeviceObject, PIRP Irp);
+
+NTSTATUS DeviceControlGetIrpOperation(FDriverContext* Context, PDEVICE_OBJECT DeviceObject, PIRP Irp);

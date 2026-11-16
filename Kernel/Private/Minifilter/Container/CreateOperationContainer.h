@@ -43,6 +43,8 @@ namespace Argus::Minifilter
 
 	struct FCreateOperationDescriptor
 	{
+		uint64 OperationId = 0;
+
 		uint32 RequestorPid = 0;
 		uint32 RequestorTid = 0;
 		EProcessorMode ProcessorMode = EProcessorMode::Unknown;
@@ -139,10 +141,46 @@ public:
 		});
 	}
 
-	NODISCARD uint64 GetDroppedCount() noexcept
+	template <typename VisitorType>
+	FORCEINLINE uint32 ForEach(VisitorType&& Visitor) const noexcept
+	{
+		FReadGuard Guard(this->Lock);
+		if (!bInitialized)
+		{
+			return static_cast<uint32>(INDEX_NONE);
+		}
+
+		using USizeType = typename TMakeUnsigned<TQueue::SizeType>::Type;
+		USizeType Index = 0;
+		for (; Index < (USizeType)Container.Num(); ++Index)
+		{
+			const auto& Descriptor = Container[Index];
+			if (!(::Invoke(Visitor, Descriptor, Index)))
+			{
+				break;
+			}
+		}
+
+		return static_cast<uint32>(Index);
+	}
+
+	template <typename PredicateType>
+	NODISCARD FORCEINLINE bool TryPopByPredicate(PredicateType&& Predicate, DescriptorType& OutDescriptor) noexcept
+	{
+		FWriteGuard Guard(this->Lock);
+		return bInitialized && Container.TryPopByPredicate(Forward<PredicateType>(Predicate), OutDescriptor);
+	}
+
+	NODISCARD uint64 GetDroppedCount() const noexcept
 	{
 		FReadGuard Guard(this->Lock);
 		return DroppedCount;
+	}
+
+	NODISCARD FORCEINLINE bool IsEmpty() const noexcept
+	{
+		FReadGuard Guard(this->Lock);
+		return this->Container.IsEmpty();
 	}
 
 	static constexpr int32 MaxEvents = 1024;
