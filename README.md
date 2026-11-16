@@ -28,7 +28,7 @@ Argus는 Windows x64 환경에서 동작하는 커널 드라이버와 사용자 
 
 ### 2.1 현재 버전
 
-`CMakeLists.txt`의 프로젝트 버전은 **1.1.1**입니다. Agent, 커널 드라이버, INF, MSI의 1.1.1 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 기록되어 있습니다.
+`CMakeLists.txt`의 프로젝트 버전은 **1.2.0**입니다. Agent, 커널 드라이버, INF, MSI의 1.2.0 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 기록되어 있습니다.
 
 ### 2.2 기능별 구현 상태
 
@@ -45,7 +45,7 @@ Argus는 Windows x64 환경에서 동작하는 커널 드라이버와 사용자 
 
 ### 2.3 알려진 제한 사항
 
-- Minifilter는 현재 CREATE 이벤트를 패시브 모드로 수집하고 Agent가 조회합니다. READ, WRITE 등 등록된 다른 파일 작업은 통과합니다. CREATE 조회 시점에 이미 수집된 CLOSE만 해당 CREATE 레코드에 병합됩니다.
+- Minifilter는 현재 CREATE 이벤트를 패시브 모드로 수집하고 Agent가 조회합니다. READ, WRITE 등 등록된 다른 파일 작업은 통과합니다. CREATE 조회 시점에 이미 수집된 CLEANUP·CLOSE만 해당 CREATE 레코드에 병합됩니다.
 - 레지스트리 정책 핸들러는 현재 `STATUS_SUCCESS`를 반환합니다. 레지스트리 알림과 차단 정책을 같은 구현 상태로 취급하지 마세요.
 - 커널 제어 장치의 SDDL은 현재 `SDDL_DEVOBJ_SYS_ALL`입니다. Agent 등록 시 서비스 SID를 확인하지만, 배포된 Agent 실행 파일의 신원·서명을 확인하는 검증은 아직 없습니다.
 - Agent 서비스는 현재 `LocalSystem`으로 실행됩니다. 정식 배포용 파일·실행 파일 서명 검증과 서비스 권한 축소는 후속 작업입니다.
@@ -106,7 +106,7 @@ Agent는 `\\.\Argus` 제어 장치를 열고 등록 IOCTL을 호출합니다. �
 
 ### 4.3 이벤트 수집 및 전달
 
-커널 콜백은 이벤트를 알림 큐에 기록하고 Agent는 프로세스, 스레드, 이미지, 레지스트리, 객체 핸들 알림을 각각 조회합니다. 프로세스·레지스트리·객체 알림에는 배치 헤더와 남은 기록 수를 다루는 경로가 있습니다. Agent는 이 세 알림 큐의 유실 건수를 로그에 반영합니다. Minifilter CREATE 작업은 별도 컨테이너에 저장되며 현재 Agent 조회 경로에는 연결되지 않았습니다.
+커널 콜백은 이벤트를 알림 큐에 기록하고 Agent는 프로세스, 스레드, 이미지, 레지스트리, 객체 핸들 알림을 각각 조회합니다. 프로세스·레지스트리·객체 알림에는 배치 헤더와 남은 기록 수를 다루는 경로가 있습니다. Minifilter CREATE 작업도 별도 컨테이너에서 Agent가 IOCTL로 조회하며, 그 시점까지 수집된 CLEANUP·CLOSE 정보를 병합합니다. Agent는 프로세스·레지스트리·객체·CREATE 큐의 유실 건수를 로그에 반영합니다.
 
 ### 4.4 프로세스 보호 구조
 
@@ -371,7 +371,7 @@ cmake --build --preset release
 | Debug `Core.lib` | `.build/windows-msvc-x64/Core/Debug/Core.lib` |
 | Debug `ArgusKernel.sys` | `.build/windows-msvc-x64/Kernel/Debug/ArgusKernel.sys` |
 | Release 번들 | `.build/windows-msvc-x64/Bundle/Release` |
-| Release MSI (WiX 설치 시) | `.build/windows-msvc-x64/Msi/Release/Argus-1.1.1-x64.msi` |
+| Release MSI (WiX 설치 시) | `.build/windows-msvc-x64/Msi/Release/Argus-1.2.0-x64.msi` |
 
 ## 7. 설치 및 실행
 
@@ -381,7 +381,7 @@ cmake --build --preset release
 
 ### 7.2 MSI 설치
 
-테스트 VM 준비 후 `.build/windows-msvc-x64/Msi/Release/Argus-1.1.1-x64.msi`를 실행합니다. MSI는 `%ProgramFiles%\Argus`에 Agent, 설치 도우미, 드라이버 패키지를 설치하고 `ArgusAgent` 서비스를 생성·자동 시작합니다. `ArgusSetup.exe msi-driver-install`을 통해 드라이버 INF를 등록하고, 서비스 SID 유형과 설치·서비스·로그 DACL을 설정합니다.
+테스트 VM 준비 후 `.build/windows-msvc-x64/Msi/Release/Argus-1.2.0-x64.msi`를 실행합니다. MSI는 `%ProgramFiles%\Argus`에 Agent, 설치 도우미, 드라이버 패키지를 설치하고 `ArgusAgent` 서비스를 생성·자동 시작합니다. `ArgusSetup.exe msi-driver-install`을 통해 드라이버 INF를 등록하고, 서비스 SID 유형과 설치·서비스·로그 DACL을 설정합니다.
 
 개발용 설치 도우미를 사용하려면 다음처럼 번들을 빌드한 후 관리자 권한으로 `ArgusSetup.exe install` 또는 `repair`를 실행합니다.
 

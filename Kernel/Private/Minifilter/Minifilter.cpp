@@ -1,6 +1,7 @@
 #include "Kernel/Private/Minifilter/Minifilter.h"
 #include "Kernel/Private/Minifilter/MinifilterTypes.h"
 #include "Kernel/Private/Minifilter/Operation/CreateOperation.h"
+#include "Kernel/Private/Minifilter/Operation/CleanupOperation.h"
 #include "Kernel/Private/Minifilter/Operation/CloseOperation.h"
 #include "Kernel/Private/DriverContext.h"
 
@@ -119,10 +120,14 @@ namespace
 		return PrePassThrough(Data, FltObjects, CompletionContext);
 	}
 
-	FLT_PREOP_CALLBACK_STATUS FLTAPI PreCleanup(
-		PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext)
+	FLT_PREOP_CALLBACK_STATUS FLTAPI PreCleanup(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext)
 	{
-		return PrePassThrough(Data, FltObjects, CompletionContext);
+		return FCleanupOperation::OnPreOperationCallback(GDriverContext->GetMinifilter(), Data, FltObjects, CompletionContext);
+	}
+
+	FLT_POSTOP_CALLBACK_STATUS FLTAPI PostCleanup(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, void* CompletionContext, FLT_POST_OPERATION_FLAGS Flags)
+	{
+		return FCleanupOperation::OnPostOperationCallback(GDriverContext->GetMinifilter(), Data, FltObjects, CompletionContext, Flags);
 	}
 
 	FLT_PREOP_CALLBACK_STATUS FLTAPI PreClose(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext)
@@ -191,7 +196,7 @@ namespace
 		{ IRP_MJ_QUERY_EA			, 0, PreQueryEa, nullptr },
 		{ IRP_MJ_SET_EA				, 0, PreSetEa, nullptr },
 		{ IRP_MJ_FILE_SYSTEM_CONTROL, 0, PreFileSystemControl, nullptr },
-		{ IRP_MJ_CLEANUP			, 0, PreCleanup, nullptr },
+		{ IRP_MJ_CLEANUP			, 0, PreCleanup, PostCleanup },
 		{ IRP_MJ_CLOSE				, 0, PreClose, nullptr },
 		{ IRP_MJ_FLUSH_BUFFERS		, 0, PreFlushBuffers, nullptr },
 		{ IRP_MJ_ACQUIRE_FOR_SECTION_SYNCHRONIZATION, 0, PreAcquireForSectionSynchronization, nullptr },

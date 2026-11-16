@@ -34,8 +34,8 @@ namespace
 	constexpr size_t FltInitialBufferBytes = 64u * 1024u;
 	constexpr size_t FltMaxBufferBytes = 1024u * 1024u;
 	constexpr uint32 AgentMajorVersion = 1;
-	constexpr uint32 AgentMinorVersion = 1;
-	constexpr uint32 AgentPatchVersion = 1;
+	constexpr uint32 AgentMinorVersion = 2;
+	constexpr uint32 AgentPatchVersion = 0;
 	constexpr WCHAR ProtectedExecutableName[] = L"maruexe.local.exe";
 	constexpr WCHAR AgentServiceName[] = L"ArgusAgent";
 	std::atomic<HANDLE> GStopEvent{ nullptr };
@@ -720,17 +720,23 @@ namespace
 		const std::string CompletionPath = FormatFltString(Buffer, Record.CompletionFilePathName);
 		const std::string Volume = FormatFltString(Buffer, Record.VolumeName);
 		const std::string CompletionVolume = FormatFltString(Buffer, Record.CompletionVolumeName);
+		const std::string CleanupAt = Record.bWasIrpCleanedUp
+			? (Record.IrpCleanupCompletionAt > 0 ? FormatTime(Record.IrpCleanupCompletionAt) : "<invalid-time>") : "<none>";
+		const std::string CloseAt = Record.bWasIrpClosed
+			? (Record.IrpClosedAt > 0 ? FormatTime(Record.IrpClosedAt) : "<invalid-time>") : "<none>";
 		Log(stdout, static_cast<int64>(Record.ObservedAt), "AUDIT", "file.create",
 			"pid=%u tid=%u mode=%u desired_access=0x%08X disposition=%u "
 			"share=0x%04X attributes=0x%04X completion_status=0x%08X "
-			"close_observed=%u volume_status=%s volume=\"%s\" path_status=%s path=\"%s\" "
+			"cleanup_observed=%u cleanup_at=%s close_observed=%u close_at=%s "
+			"volume_status=%s volume=\"%s\" path_status=%s path=\"%s\" "
 			"completion_volume_status=%s completion_volume=\"%s\" "
 			"completion_path_status=%s completion_path=\"%s\"",
 			Record.RequestorPid, Record.RequestorTid, static_cast<unsigned>(Record.ProcessorMode),
 			Record.FileDesiredAccess, Record.FileDisposition,
 			static_cast<unsigned>(Record.FileSharedAccess), static_cast<unsigned>(Record.FileAttributes),
 			Record.CompletionStatus,
-			Record.bWasIrpClosed ? 1u : 0u,
+			Record.bWasIrpCleanedUp ? 1u : 0u, CleanupAt.c_str(),
+			Record.bWasIrpClosed ? 1u : 0u, CloseAt.c_str(),
 			FltStringStatusName(Record.VolumeName.Status), Volume.c_str(),
 			FltStringStatusName(Record.FilePathName.Status), Path.c_str(),
 			FltStringStatusName(Record.CompletionVolumeName.Status), CompletionVolume.c_str(),

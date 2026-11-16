@@ -123,7 +123,7 @@ NTSTATUS DeviceControlGetProcessNotify(FDriverContext* Context, PDEVICE_OBJECT D
 
 	Argus::DeviceControl::FProcessNotifyRP RequestPacket{};
 	{
-		auto* TmpRp = static_cast<Argus::DeviceControl::FObjectOperationRP*>((void*)Buffer);
+		auto* TmpRp = static_cast<Argus::DeviceControl::FProcessNotifyRP*>((void*)Buffer);
 		if (TmpRp == nullptr)
 		{
 			return STATUS_INVALID_PARAMETER;
@@ -950,12 +950,10 @@ static void WriteFltString(uint8* OutputBuffer, uint64 Offset, const FString<>& 
 }
 
 template <typename ContainerType>
-void CalCulateNextNumAndBytes(const ContainerType& Container, uint32 ProcessId, uint32 Max,
-	uint32& NextNum, uint64& NextBytes) noexcept;
+void CalCulateNextNumAndBytes(const ContainerType& Container, uint32 ProcessId, uint32 Max, uint32& NextNum, uint64& NextBytes) noexcept;
 
 template <>
-void CalCulateNextNumAndBytes<FCreateOperationContainer>(const FCreateOperationContainer& Container, uint32 ProcessId,
-	uint32 Max, uint32& NextNum, uint64& NextBytes) noexcept
+void CalCulateNextNumAndBytes<FCreateOperationContainer>(const FCreateOperationContainer& Container, uint32 ProcessId, uint32 Max, uint32& NextNum, uint64& NextBytes) noexcept
 {
 	uint32 NewNextNum   = NextNum;
 	uint64 NewNextBytes = NextBytes;
@@ -964,6 +962,7 @@ void CalCulateNextNumAndBytes<FCreateOperationContainer>(const FCreateOperationC
 	Container.ForEach([ProcessId, Max, &NewNextNum, &NewNextBytes](const DescriptorType& Descriptor, uint32) -> bool {
 		if (ProcessId != 0 && Descriptor.RequestorPid != ProcessId)
 		{
+			/* Don't capture, keep iteration. */
 			return true;
 		}
 		if (NewNextNum >= Max)
@@ -1075,8 +1074,9 @@ NTSTATUS DeviceControlGetIrpOperation(FDriverContext* Context, PDEVICE_OBJECT De
 	uint32 NumWrite = 0;
 	uint64 NumWriteOffset = HeaderBytes;
 	{
-		auto& CreateContainer = MinifilterContainer.Get<Argus::Minifilter::EOperation::Create>();
-		auto& CloseContainer  = MinifilterContainer.Get<Argus::Minifilter::EOperation::Close >();
+		auto& CreateContainer  = MinifilterContainer.Get<Argus::Minifilter::EOperation::Create >();
+		auto& CleanupContainer = MinifilterContainer.Get<Argus::Minifilter::EOperation::Cleanup>();
+		auto& CloseContainer   = MinifilterContainer.Get<Argus::Minifilter::EOperation::Close  >();
 
 		const bool bRequestCreate = static_cast<bool>(
 			RequestPacket.OperationFlgs & Argus::Policy::EMinifilterPolicyOperationFlags::Create);
@@ -1156,15 +1156,28 @@ NTSTATUS DeviceControlGetIrpOperation(FDriverContext* Context, PDEVICE_OBJECT De
 			WriteFltString(OutputBuffer, CompletionVolumeNameOffset  , CreateOpDescriptor.CompletionVolumeName	, CreateOpDescriptor.CompletionVolumeNameStatus	 , Record.CompletionVolumeName);
 			WriteFltString(OutputBuffer, CompletionFilePathNameOffset, CreateOpDescriptor.CompletionFilePathName, CreateOpDescriptor.CompletionFilePathNameStatus, Record.CompletionFilePathName);
 
+			Argus::Minifilter::FCleanupOperationDescriptor CleanupOpDescriptor{};
+			bool bCleanupOpPopSucceed = CleanupContainer.TryPopByPredicate([&CreateOpDescriptor](const decltype(CleanupOpDescriptor)& Descriptor) -> bool {
+				return Descriptor.OperationId == CreateOpDescriptor.OperationId;
+			}, CleanupOpDescriptor);
+			if (bCleanupOpPopSucceed)
+			{
+				Record.IrpCleanupCompletionInformation = CleanupOpDescriptor.CompletionInformation;
+				Record.IrpCleanupCompletionStatus      = CleanupOpDescriptor.CompletionStatus;
+				Record.IrpCleanupCompletionAt		   = CleanupOpDescriptor.CompletionObservedAt.QuadPart;
+				Record.bWasIrpCleanedUp = true;
+			}
+
 			Argus::Minifilter::FCloseOperationDescriptor CloseOpDescriptor{};
 			bool bCloseOpPopSucceed = CloseContainer.TryPopByPredicate([&CreateOpDescriptor](const decltype(CloseOpDescriptor)& Descriptor) -> bool {
 				return Descriptor.OperationId == CreateOpDescriptor.OperationId;
 			}, CloseOpDescriptor);
-
 			if (bCloseOpPopSucceed)
 			{
+				Record.IrpClosedAt = CloseOpDescriptor.ObservedAt.QuadPart;
 				Record.bWasIrpClosed = true;
 			}
+
 			if (PaddingBytes != 0)
 			{
 				RtlZeroMemory(OutputBuffer + NumWriteOffset + RawRecordBytes, PaddingBytes);

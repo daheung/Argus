@@ -124,8 +124,16 @@ namespace Argus::DeviceControl
 		/* NTSTATUS returned by the create operation, stored as a 32-bit value. */
 		uint32 CompletionStatus;
 
+		int64 IrpClosedAt;
+
 		/* Reserved for a matching IRP_MJ_CLOSE on this create's file object. */
 		bool bWasIrpClosed;
+
+		int64 IrpCleanupCompletionAt;
+
+		uint64 IrpCleanupCompletionInformation;
+
+		uint32 IrpCleanupCompletionStatus;
 		
 		/* Reserved for a matching IRP_MJ_CLEANUP on this create's file object. */
 		bool bWasIrpCleanedUp;
