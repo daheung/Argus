@@ -168,7 +168,10 @@ FORCEINLINE void DestructItem(ElementType* Element) noexcept
 {
 	if constexpr (TNot<TIsTriviallyDestructible<ElementType>>::Value)
 	{
-		Element->ElementType::~ElementType();
+		// MSVC can reject ElementType::~ElementType when ElementType is a template
+		// specialization. The typedef preserves this exact-type destructor call.
+		typedef ElementType DestructItemsElementTypeTypedef;
+		Element->DestructItemsElementTypeTypedef::~DestructItemsElementTypeTypedef();
 	}
 }
 
@@ -185,7 +188,10 @@ FORCEINLINE void DestructItems(ElementType* Elements, SizeType Count)
 		using USizeType = typename TMakeUnsigned<SizeType>::Type;
 		for (USizeType Index = 0; Index < (USizeType)Count; ++Index)
 		{
-			(&Elements[Index])->ElementType::~ElementType();
+			// MSVC can reject ElementType::~ElementType when ElementType is a template
+			// specialization. The typedef preserves this exact-type destructor call.
+			typedef ElementType DestructItemsElementTypeTypedef;
+			(&Elements[Index])->DestructItemsElementTypeTypedef::~DestructItemsElementTypeTypedef();
 		}
 	}
 }

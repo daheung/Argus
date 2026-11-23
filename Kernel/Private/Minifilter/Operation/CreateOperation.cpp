@@ -155,14 +155,14 @@ namespace
 		{
 			//auto  Decision = EvaluateDeferredPreDecision(*Context);
 			auto  Decision = FCreateOperation::FRules::ApplyPreDecisionDeferred(GDriverContext->GetMinifilter(), *Context);
-			if (Decision.Decision == Argus::Minifilter::ECreatePreOperationDecision::PreOperationPass)
+			if (Decision.Decision == Argus::Minifilter::EPreOperationDecision::PreOperationPass)
 			{
 				ReleaseCreateContext(Context);
 				FltCompletePendedPreOperation(CallbackData, FLT_PREOP_SUCCESS_NO_CALLBACK, nullptr);
 			}
 			else
 			{
-				const NTSTATUS Status = Decision.Decision == Argus::Minifilter::ECreatePreOperationDecision::PreOperationBlock
+				const NTSTATUS Status = Decision.Decision == Argus::Minifilter::EPreOperationDecision::PreOperationBlock
 					? Decision.BlockStatus : STATUS_INVALID_PARAMETER;
 
 				ReleaseCreateContext(Context);
@@ -209,25 +209,25 @@ FLT_PREOP_CALLBACK_STATUS FCreateOperation::OnPreOperationCallback(
 	}
 }
 
-Argus::Minifilter::FCreatePreOperationDecision FCreateOperation::FRules::ApplyPreDecision(
+Argus::Minifilter::FPreOperationDecision FCreateOperation::FRules::ApplyPreDecision(
 	FMinifilter& Filter, const Argus::Minifilter::FCreateOperationDescriptor& Descriptor) noexcept
 {
 	UNREFERENCED_PARAMETER(Filter);
 	UNREFERENCED_PARAMETER(Descriptor);
 
-	Argus::Minifilter::FCreatePreOperationDecision Decision{};
-	Decision.Decision = Argus::Minifilter::ECreatePreOperationDecision::PreOperationPass;
+	Argus::Minifilter::FPreOperationDecision Decision{};
+	Decision.Decision = Argus::Minifilter::EPreOperationDecision::PreOperationPass;
 	return Decision;
 }
 
-Argus::Minifilter::FCreatePreOperationDecision FCreateOperation::FRules::ApplyPreDecisionDeferred(
+Argus::Minifilter::FPreOperationDecision FCreateOperation::FRules::ApplyPreDecisionDeferred(
 	FMinifilter& Filter, const Argus::Minifilter::FCreateOperationDescriptor& Descriptor) noexcept
 {
 	UNREFERENCED_PARAMETER(Filter);
 	UNREFERENCED_PARAMETER(Descriptor);
 
-	Argus::Minifilter::FCreatePreOperationDecision Decision{};
-	Decision.Decision = Argus::Minifilter::ECreatePreOperationDecision::PreOperationPass;
+	Argus::Minifilter::FPreOperationDecision Decision{};
+	Decision.Decision = Argus::Minifilter::EPreOperationDecision::PreOperationPass;
 	return Decision;
 }
 
@@ -277,11 +277,11 @@ FLT_PREOP_CALLBACK_STATUS FCreateOperation::OnPreOperationFilterActiveCallback(
 
 	switch (Decision.Decision)
 	{
-	case Argus::Minifilter::ECreatePreOperationDecision::PreOperationPass:
+	case Argus::Minifilter::EPreOperationDecision::PreOperationPass:
 		return FLT_PREOP_SUCCESS_NO_CALLBACK;
-	case Argus::Minifilter::ECreatePreOperationDecision::PreOperationBlock:
+	case Argus::Minifilter::EPreOperationDecision::PreOperationBlock:
 		return CompletePreWithStatus(CallbackData, Decision.BlockStatus);
-	case Argus::Minifilter::ECreatePreOperationDecision::PreOperationPending:
+	case Argus::Minifilter::EPreOperationDecision::PreOperationPending:
 	{
 		const bool bCanPendIrp = FLT_IS_IRP_OPERATION(CallbackData);
 		if (!bCanPendIrp)
@@ -354,14 +354,14 @@ FLT_POSTOP_CALLBACK_STATUS FCreateOperation::OnPostOperationFilterPassiveCallbac
 	return FLT_POSTOP_FINISHED_PROCESSING;
 }
 
-Argus::Minifilter::FCreatePostOperationDecision FCreateOperation::FRules::ApplyPostDecision(
+Argus::Minifilter::FPostOperationDecision FCreateOperation::FRules::ApplyPostDecision(
 	PFLT_CALLBACK_DATA CallbackData, PCFLT_RELATED_OBJECTS FltObjects, const Argus::Minifilter::FCreateOperationDescriptor& Descriptor) noexcept
 {	
 	UNREFERENCED_PARAMETER(CallbackData);
 	UNREFERENCED_PARAMETER(FltObjects);
 	UNREFERENCED_PARAMETER(Descriptor);
 
-	Argus::Minifilter::FCreatePostOperationDecision Decision{};
-	Decision.Decision = Argus::Minifilter::ECreatePostOperationDecision::PostOperationPass;
+	Argus::Minifilter::FPostOperationDecision Decision{};
+	Decision.Decision = Argus::Minifilter::EPostOperationDecision::PostOperationPass;
 	return Decision;
 }

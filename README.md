@@ -28,7 +28,7 @@ Argus는 Windows x64 환경에서 동작하는 커널 드라이버와 사용자 
 
 ### 2.1 현재 버전
 
-`CMakeLists.txt`의 프로젝트 버전은 **1.2.0**입니다. Agent, 커널 드라이버, INF, MSI의 1.2.0 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 기록되어 있습니다.
+`CMakeLists.txt`의 프로젝트 버전은 **1.3.0**입니다. Agent, 커널 드라이버, INF, MSI의 1.3.0 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 기록되어 있습니다.
 
 ### 2.2 기능별 구현 상태
 
@@ -290,8 +290,8 @@ struct FCreateOperationDescriptor
   uint32 Disposition = 0;
   ACCESS_MASK DesiredAccess = 0;
 
-  FCreatePreOperationDecision PreOperationDecision{};
-  FCreatePostOperationDecision PostOperationDecision{};
+  FPreOperationDecision PreOperationDecision{};
+  FPostOperationDecision PostOperationDecision{};
 
   EOperationStringStatus VolumeNameStatus = EOperationStringStatus::NotApplicable;
   EOperationStringStatus FilePathNameStatus = EOperationStringStatus::NotApplicable;
@@ -371,7 +371,7 @@ cmake --build --preset release
 | Debug `Core.lib` | `.build/windows-msvc-x64/Core/Debug/Core.lib` |
 | Debug `ArgusKernel.sys` | `.build/windows-msvc-x64/Kernel/Debug/ArgusKernel.sys` |
 | Release 번들 | `.build/windows-msvc-x64/Bundle/Release` |
-| Release MSI (WiX 설치 시) | `.build/windows-msvc-x64/Msi/Release/Argus-1.2.0-x64.msi` |
+| Release MSI (WiX 설치 시) | `.build/windows-msvc-x64/Msi/Release/Argus-1.3.0-x64.msi` |
 
 ## 7. 설치 및 실행
 
@@ -381,7 +381,7 @@ cmake --build --preset release
 
 ### 7.2 MSI 설치
 
-테스트 VM 준비 후 `.build/windows-msvc-x64/Msi/Release/Argus-1.2.0-x64.msi`를 실행합니다. MSI는 `%ProgramFiles%\Argus`에 Agent, 설치 도우미, 드라이버 패키지를 설치하고 `ArgusAgent` 서비스를 생성·자동 시작합니다. `ArgusSetup.exe msi-driver-install`을 통해 드라이버 INF를 등록하고, 서비스 SID 유형과 설치·서비스·로그 DACL을 설정합니다.
+테스트 VM 준비 후 `.build/windows-msvc-x64/Msi/Release/Argus-1.3.0-x64.msi`를 실행합니다. MSI는 `%ProgramFiles%\Argus`에 Agent, 설치 도우미, 드라이버 패키지를 설치하고 `ArgusAgent` 서비스를 생성·자동 시작합니다. `ArgusSetup.exe msi-driver-install`을 통해 드라이버 INF를 등록하고, 서비스 SID 유형과 설치·서비스·로그 DACL을 설정합니다.
 
 개발용 설치 도우미를 사용하려면 다음처럼 번들을 빌드한 후 관리자 권한으로 `ArgusSetup.exe install` 또는 `repair`를 실행합니다.
 

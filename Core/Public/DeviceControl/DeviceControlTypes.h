@@ -21,8 +21,10 @@ namespace Argus::DeviceControl
 
 	struct FStringDescriptor
 	{
-		EStringStatus Status;
 		uint64 Offset;
 		uint64 Bytes;
 	};
+	static_assert(sizeof(FStringDescriptor) == 16);
+	static_assert(offsetof(FStringDescriptor, Offset) == 0);
+	static_assert(offsetof(FStringDescriptor, Bytes) == 8);
 }

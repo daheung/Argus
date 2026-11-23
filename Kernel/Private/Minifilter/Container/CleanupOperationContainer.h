@@ -24,9 +24,7 @@ namespace Argus::Minifilter
 	};
 }
 
-class FCleanupOperationContainer :
-	public FOperationContainer<Argus::Minifilter::FCleanupOperationDescriptor, EPoolType::NonPaged, Argus::Minifilter::ELockType::Spinlock>
-{
-public:
-	using Super = FOperationContainer<Argus::Minifilter::FCleanupOperationDescriptor, EPoolType::NonPaged, Argus::Minifilter::ELockType::Spinlock>;
-};
+using FCleanupOperationContainer = FOperationContainer<
+	Argus::Minifilter::FCleanupOperationDescriptor,
+	EPoolType::NonPaged,
+	EContainerLockType::Spinlock>;

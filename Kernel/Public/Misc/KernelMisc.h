@@ -5,7 +5,7 @@
 #include "Core/Public/DeviceControl/Protocols/FltGetIrpOperationProtocol.h"
 #include "Kernel/Public/Misc/KernelDefines.h"
 #include "Kernel/Public/Misc/KernelTypes.h"
-#include "Kernel/Private/Minifilter/Container/CreateOperationContainer.h"
+#include "Kernel/Private/Minifilter/MinifilterTypes.h"
 
 FORCEINLINE EProcessorMode ProcessorModeFrom(KPROCESSOR_MODE Mode) noexcept
 {
@@ -32,38 +32,39 @@ FORCEINLINE Argus::DeviceControl::EProcessorMode ProcessorModeTo(EProcessorMode 
 
 namespace Argus::Minifilter::Private
 {
-	FORCEINLINE Argus::DeviceControl::EFltIrpPreOperationDecision PreDecisionEnumTo(Argus::Minifilter::ECreatePreOperationDecision Decision) noexcept
+	FORCEINLINE Argus::DeviceControl::EFltIrpPreOperationDecision PreDecisionEnumTo(Argus::Minifilter::EPreOperationDecision Decision) noexcept
 	{
 		using namespace Argus::Minifilter;
 		using namespace Argus::DeviceControl;
 
 		switch (Decision)
 		{
-		case ECreatePreOperationDecision::PreOperationPass:	   return EFltIrpPreOperationDecision::PreOperationPass;
-		case ECreatePreOperationDecision::PreOperationBlock:   return EFltIrpPreOperationDecision::PreOperationBlock;
-		case ECreatePreOperationDecision::PreOperationPending: return EFltIrpPreOperationDecision::PreOperationPendingDecision;
+		case EPreOperationDecision::PreOperationPass:	   return EFltIrpPreOperationDecision::PreOperationPass;
+		case EPreOperationDecision::PreOperationBlock:   return EFltIrpPreOperationDecision::PreOperationBlock;
+		case EPreOperationDecision::PreOperationPending: return EFltIrpPreOperationDecision::PreOperationPendingDecision;
 		default:
 			return EFltIrpPreOperationDecision::PreOperationNone;
 		}
 	}
 
-	FORCEINLINE Argus::DeviceControl::EFltIrpPostOperationDecision PostDecisionEnumTo(Argus::Minifilter::ECreatePostOperationDecision Decision) noexcept
+	FORCEINLINE Argus::DeviceControl::EFltIrpPostOperationDecision PostDecisionEnumTo(Argus::Minifilter::EPostOperationDecision Decision) noexcept
 	{
 		using namespace Argus::Minifilter;
 		using namespace Argus::DeviceControl;
 
 		switch (Decision)
 		{
-		case ECreatePostOperationDecision::PostOperationPass:  return EFltIrpPostOperationDecision::PostOperationPass;
-		case ECreatePostOperationDecision::PostOperationBlock: return EFltIrpPostOperationDecision::PostOperationBlock;
-		case ECreatePostOperationDecision::PostOperationMoreProcessingRequired: return EFltIrpPostOperationDecision::PostOperationPendingDecision;
+		case EPostOperationDecision::PostOperationNone: return EFltIrpPostOperationDecision::PostOperationNone;
+		case EPostOperationDecision::PostOperationPass: return EFltIrpPostOperationDecision::PostOperationPass;
+		case EPostOperationDecision::PostOperationBlock: return EFltIrpPostOperationDecision::PostOperationBlock;
+		case EPostOperationDecision::PostOperationMoreProcessingRequired: return EFltIrpPostOperationDecision::PostOperationPendingDecision;
 		default:
 			return EFltIrpPostOperationDecision::PostOperationNone;
 		}
 	}
 };
 
-FORCEINLINE Argus::DeviceControl::FFltIrpPreOperationDecision PreDecisionTo(Argus::Minifilter::FCreatePreOperationDecision Decision) noexcept
+FORCEINLINE Argus::DeviceControl::FFltIrpPreOperationDecision PreDecisionTo(Argus::Minifilter::FPreOperationDecision Decision) noexcept
 {
 	Argus::DeviceControl::FFltIrpPreOperationDecision OutDecision{};
 	OutDecision.Decision = Argus::Minifilter::Private::PreDecisionEnumTo(Decision.Decision);
@@ -71,7 +72,7 @@ FORCEINLINE Argus::DeviceControl::FFltIrpPreOperationDecision PreDecisionTo(Argu
 	return OutDecision;
 }
 
-FORCEINLINE Argus::DeviceControl::FFltIrpPostOperationDecision PostDecisionTo(Argus::Minifilter::FCreatePostOperationDecision Decision) noexcept
+FORCEINLINE Argus::DeviceControl::FFltIrpPostOperationDecision PostDecisionTo(Argus::Minifilter::FPostOperationDecision Decision) noexcept
 {
 	Argus::DeviceControl::FFltIrpPostOperationDecision OutDecision{};
 	OutDecision.Decision = Argus::Minifilter::Private::PostDecisionEnumTo(Decision.Decision);

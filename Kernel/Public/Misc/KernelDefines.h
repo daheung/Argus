@@ -14,5 +14,5 @@
 #include "Core/Public/Memory/Memory.h"
 
 #define MAJOR_VERSION 0x01
-#define MINOR_VERSION 0x02
+#define MINOR_VERSION 0x03
 #define PATCH_VERSION 0x00

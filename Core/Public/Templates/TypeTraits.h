@@ -134,3 +134,70 @@ template <> struct TIsBitwiseConstructible<uint32,  int32> { enum { Value = true
 template <> struct TIsBitwiseConstructible< int32, uint32> { enum { Value = true }; };
 template <> struct TIsBitwiseConstructible<uint64,  int64> { enum { Value = true }; };
 template <> struct TIsBitwiseConstructible< int64, uint64> { enum { Value = true }; };
+
+template <typename... ArgsType>
+struct TTypeList 
+{
+
+};
+
+template <size_t Index, typename TypeList>
+struct TTypeAt
+{
+
+};
+
+template <size_t Index, typename First, typename... ArgsType>
+struct TTypeAt<Index, TTypeList<First, ArgsType...>>
+{
+	using Type = typename TTypeAt<Index - 1, TTypeList<ArgsType...>>::Type;
+};
+
+template <typename First, typename... ArgsType>
+struct TTypeAt<0, TTypeList<First, ArgsType...>>
+{
+	using Type = First;
+};
+
+template <size_t... Indices>
+struct TIndexSequence
+{
+
+};
+
+template <size_t N, size_t... Indices>
+struct TMakeIndexSequenceImpl
+	: TMakeIndexSequenceImpl<N - 1, N - 1, Indices...>
+{
+
+};
+
+template <size_t... Indices>
+struct TMakeIndexSequenceImpl<0, Indices...>
+{
+	using Type = TIndexSequence<Indices...>;
+};
+
+template <size_t N> using TMakeIndexSequence = typename TMakeIndexSequenceImpl<N>::Type;
+
+template <typename T>
+struct TFunctionTraits;
+
+template <typename RetType, typename... ArgsType>
+struct TFunctionTraits<RetType(*)(ArgsType...)>
+{
+	using ReturnType = RetType;
+	using ArgumentsTypes = TTypeList<ArgsType...>;
+
+	template <size_t Index>
+	using ArgumentType = typename TTypeAt<Index, ArgumentsTypes>::Type;
+
+	static constexpr size_t ArgumentCount = sizeof...(ArgsType);
+};
+
+template<typename RetType, typename... ArgsType>
+struct TFunctionTraits<RetType(*)(ArgsType...) noexcept>
+	: TFunctionTraits<RetType(*)(ArgsType...)>
+{
+
+};

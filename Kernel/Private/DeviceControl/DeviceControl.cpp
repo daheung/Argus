@@ -923,29 +923,25 @@ static uint64 CapturedFltStringBytes(const FString<>& Text, Argus::Minifilter::E
 		? static_cast<uint64>(Text.Len()) * sizeof(FString<>::ElementType) : 0;
 }
 
-static void WriteFltString(uint8* OutputBuffer, uint64 Offset, const FString<>& Text,
+static Argus::DeviceControl::EStringStatus WriteFltString(uint8* OutputBuffer, uint64 Offset, const FString<>& Text,
 	Argus::Minifilter::EOperationStringStatus Status, Argus::DeviceControl::FStringDescriptor& Wire) noexcept
 {
-	switch (Status)
-	{
-	case Argus::Minifilter::EOperationStringStatus::Captured:
-		Wire.Status = Argus::DeviceControl::EStringStatus::Captured;
-		break;
-	case Argus::Minifilter::EOperationStringStatus::Unavailable:
-		Wire.Status = Argus::DeviceControl::EStringStatus::Unavailable;
-		break;
-	case Argus::Minifilter::EOperationStringStatus::AllocationFailed:
-		Wire.Status = Argus::DeviceControl::EStringStatus::AllocationFailed;
-		break;
-	default:
-		Wire.Status = Argus::DeviceControl::EStringStatus::NotApplicable;
-		break;
-	}
 	Wire.Offset = Offset;
 	Wire.Bytes = CapturedFltStringBytes(Text, Status);
 	if (Wire.Bytes != 0)
 	{
 		RtlCopyMemory(OutputBuffer + Offset, Text.GetCharArray().GetData(), Wire.Bytes);
+	}
+	switch (Status)
+	{
+	case Argus::Minifilter::EOperationStringStatus::Captured:
+		return Argus::DeviceControl::EStringStatus::Captured;
+	case Argus::Minifilter::EOperationStringStatus::Unavailable:
+		return Argus::DeviceControl::EStringStatus::Unavailable;
+	case Argus::Minifilter::EOperationStringStatus::AllocationFailed:
+		return Argus::DeviceControl::EStringStatus::AllocationFailed;
+	default:
+		return Argus::DeviceControl::EStringStatus::NotApplicable;
 	}
 }
 
@@ -1151,10 +1147,14 @@ NTSTATUS DeviceControlGetIrpOperation(FDriverContext* Context, PDEVICE_OBJECT De
 			Record.bIsOpenReparsePoint	   = CreateOpDescriptor.bOpenReparsePoint;
 			Record.PaddingBytes			   = PaddingBytes;
 
-			WriteFltString(OutputBuffer, VolumeNameOffset			 , CreateOpDescriptor.VolumeName			, CreateOpDescriptor.VolumeNameStatus			 , Record.VolumeName);
-			WriteFltString(OutputBuffer, FilePathNameOffset			 , CreateOpDescriptor.FilePathName			, CreateOpDescriptor.FilePathNameStatus			 , Record.FilePathName);
-			WriteFltString(OutputBuffer, CompletionVolumeNameOffset  , CreateOpDescriptor.CompletionVolumeName	, CreateOpDescriptor.CompletionVolumeNameStatus	 , Record.CompletionVolumeName);
-			WriteFltString(OutputBuffer, CompletionFilePathNameOffset, CreateOpDescriptor.CompletionFilePathName, CreateOpDescriptor.CompletionFilePathNameStatus, Record.CompletionFilePathName);
+			Record.VolumeNameStatus = WriteFltString(OutputBuffer, VolumeNameOffset,
+				CreateOpDescriptor.VolumeName, CreateOpDescriptor.VolumeNameStatus, Record.VolumeName);
+			Record.FilePathNameStatus = WriteFltString(OutputBuffer, FilePathNameOffset,
+				CreateOpDescriptor.FilePathName, CreateOpDescriptor.FilePathNameStatus, Record.FilePathName);
+			Record.CompletionVolumeNameStatus = WriteFltString(OutputBuffer, CompletionVolumeNameOffset,
+				CreateOpDescriptor.CompletionVolumeName, CreateOpDescriptor.CompletionVolumeNameStatus, Record.CompletionVolumeName);
+			Record.CompletionFilePathNameStatus = WriteFltString(OutputBuffer, CompletionFilePathNameOffset,
+				CreateOpDescriptor.CompletionFilePathName, CreateOpDescriptor.CompletionFilePathNameStatus, Record.CompletionFilePathName);
 
 			Argus::Minifilter::FCleanupOperationDescriptor CleanupOpDescriptor{};
 			bool bCleanupOpPopSucceed = CleanupContainer.TryPopByPredicate([&CreateOpDescriptor](const decltype(CleanupOpDescriptor)& Descriptor) -> bool {

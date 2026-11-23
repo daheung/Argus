@@ -12,6 +12,7 @@
 #include "Kernel/Private/Callback/RegistryCallback.h"
 #include "Kernel/Private/Protection/ProtectedProcessRegistry.h"
 #include "Kernel/Private/Protection/IsolationProcessRegistry.h"
+#include "Kernel/Private/Protection/RegistryRules.h"
 
 class FDriverContext
 {
@@ -125,12 +126,14 @@ private:
 	FProtectedProcessRegistry ProtectedProcessRegistry;
 	FIsolationProcessRegistry IsolationProcessRegistry;
 	
+	FRegistryRules Rules;
+
 	PDEVICE_OBJECT DeviceObject = nullptr;
 	
-	bool bSymbolicLinkCreated = false;
-	bool bProcessNotifyRegistered = false;
-	bool bThreadNotifyRegistered = false;
-	bool bImageNotifyRegistered = false;
+	bool bSymbolicLinkCreated		 = false;
+	bool bProcessNotifyRegistered	 = false;
+	bool bThreadNotifyRegistered	 = false;
+	bool bImageNotifyRegistered		 = false;
 	bool bRegistryCallbackRegistered = false;
 
 	LARGE_INTEGER CmCallbackRegistryCookie{};

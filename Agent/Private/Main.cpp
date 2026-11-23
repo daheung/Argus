@@ -10,11 +10,14 @@
 #include "Core/Public/DeviceControl/Protocols/RegisterAgentProtocol.h"
 #include "Core/Public/DeviceControl/Protocols/RegisterProcessProtocol.h"
 #include "Core/Public/DeviceControl/Protocols/ThreadNotifyProtocol.h"
+#include "Core/Public/DeviceControl/Protocols/RegisterRuleProtocol.h"
+#include "Agent/Private/Rules.h"
 
 #include <cstdio>
 #include <cstdarg>
 #include <atomic>
 #include <cstring>
+#include <cwchar>
 #include <share.h>
 #include <string>
 #include <unordered_map>
@@ -34,7 +37,7 @@ namespace
 	constexpr size_t FltInitialBufferBytes = 64u * 1024u;
 	constexpr size_t FltMaxBufferBytes = 1024u * 1024u;
 	constexpr uint32 AgentMajorVersion = 1;
-	constexpr uint32 AgentMinorVersion = 2;
+	constexpr uint32 AgentMinorVersion = 3;
 	constexpr uint32 AgentPatchVersion = 0;
 	constexpr WCHAR ProtectedExecutableName[] = L"maruexe.local.exe";
 	constexpr WCHAR AgentServiceName[] = L"ArgusAgent";
@@ -627,12 +630,12 @@ namespace
 	}
 
 	bool ValidateFltString(const Argus::DeviceControl::FStringDescriptor& String,
-		size_t TotalBytes, size_t& Offset) noexcept
+		Argus::DeviceControl::EStringStatus Status, size_t TotalBytes, size_t& Offset) noexcept
 	{
-		if (String.Status > Argus::DeviceControl::EStringStatus::AllocationFailed ||
+		if (Status > Argus::DeviceControl::EStringStatus::AllocationFailed || Offset > TotalBytes ||
 			String.Offset != Offset || String.Bytes % sizeof(WCHAR) != 0 ||
 			String.Bytes > TotalBytes - Offset ||
-			(String.Status != Argus::DeviceControl::EStringStatus::Captured && String.Bytes != 0))
+			(Status != Argus::DeviceControl::EStringStatus::Captured && String.Bytes != 0))
 		{
 			return false;
 		}
@@ -678,10 +681,10 @@ namespace
 			}
 
 			size_t NextOffset = Offset + sizeof(FRecord);
-			if (!ValidateFltString(Record.VolumeName, BytesReturned, NextOffset) ||
-				!ValidateFltString(Record.FilePathName, BytesReturned, NextOffset) ||
-				!ValidateFltString(Record.CompletionVolumeName, BytesReturned, NextOffset) ||
-				!ValidateFltString(Record.CompletionFilePathName, BytesReturned, NextOffset) ||
+			if (!ValidateFltString(Record.VolumeName, Record.VolumeNameStatus, BytesReturned, NextOffset) ||
+				!ValidateFltString(Record.FilePathName, Record.FilePathNameStatus, BytesReturned, NextOffset) ||
+				!ValidateFltString(Record.CompletionVolumeName, Record.CompletionVolumeNameStatus, BytesReturned, NextOffset) ||
+				!ValidateFltString(Record.CompletionFilePathName, Record.CompletionFilePathNameStatus, BytesReturned, NextOffset) ||
 				Record.PaddingBytes > BytesReturned - NextOffset)
 			{
 				return false;
@@ -704,11 +707,12 @@ namespace
 		return Offset == BytesReturned && Records.size() == Header.TotalCount;
 	}
 
-	std::string FormatFltString(const uint8* Buffer, const Argus::DeviceControl::FStringDescriptor& String)
+	std::string FormatFltString(const uint8* Buffer, const Argus::DeviceControl::FStringDescriptor& String,
+		Argus::DeviceControl::EStringStatus Status)
 	{
-		if (String.Status != Argus::DeviceControl::EStringStatus::Captured)
+		if (Status != Argus::DeviceControl::EStringStatus::Captured)
 		{
-			return std::string("<") + FltStringStatusName(String.Status) + ">";
+			return std::string("<") + FltStringStatusName(Status) + ">";
 		}
 		return FormatProcessText(Buffer, String.Offset, String.Bytes, "");
 	}
@@ -716,10 +720,10 @@ namespace
 	void LogFltCreateRecord(const uint8* Buffer,
 		const Argus::DeviceControl::FFltIrpCreateOperationRecord& Record)
 	{
-		const std::string Path = FormatFltString(Buffer, Record.FilePathName);
-		const std::string CompletionPath = FormatFltString(Buffer, Record.CompletionFilePathName);
-		const std::string Volume = FormatFltString(Buffer, Record.VolumeName);
-		const std::string CompletionVolume = FormatFltString(Buffer, Record.CompletionVolumeName);
+		const std::string Path = FormatFltString(Buffer, Record.FilePathName, Record.FilePathNameStatus);
+		const std::string CompletionPath = FormatFltString(Buffer, Record.CompletionFilePathName, Record.CompletionFilePathNameStatus);
+		const std::string Volume = FormatFltString(Buffer, Record.VolumeName, Record.VolumeNameStatus);
+		const std::string CompletionVolume = FormatFltString(Buffer, Record.CompletionVolumeName, Record.CompletionVolumeNameStatus);
 		const std::string CleanupAt = Record.bWasIrpCleanedUp
 			? (Record.IrpCleanupCompletionAt > 0 ? FormatTime(Record.IrpCleanupCompletionAt) : "<invalid-time>") : "<none>";
 		const std::string CloseAt = Record.bWasIrpClosed
@@ -737,10 +741,10 @@ namespace
 			Record.CompletionStatus,
 			Record.bWasIrpCleanedUp ? 1u : 0u, CleanupAt.c_str(),
 			Record.bWasIrpClosed ? 1u : 0u, CloseAt.c_str(),
-			FltStringStatusName(Record.VolumeName.Status), Volume.c_str(),
-			FltStringStatusName(Record.FilePathName.Status), Path.c_str(),
-			FltStringStatusName(Record.CompletionVolumeName.Status), CompletionVolume.c_str(),
-			FltStringStatusName(Record.CompletionFilePathName.Status), CompletionPath.c_str());
+			FltStringStatusName(Record.VolumeNameStatus), Volume.c_str(),
+			FltStringStatusName(Record.FilePathNameStatus), Path.c_str(),
+			FltStringStatusName(Record.CompletionVolumeNameStatus), CompletionVolume.c_str(),
+			FltStringStatusName(Record.CompletionFilePathNameStatus), CompletionPath.c_str());
 	}
 
 	const char* ProcessPolicyRoleName(Argus::Policy::EPolicyRole Role) noexcept
@@ -829,9 +833,109 @@ namespace
 	}
 }
 
-static int RunAgent(HANDLE StopEvent)
+static std::wstring DefaultRulePath()
 {
-	HANDLE Device = CreateFileW(LR"(\\.\Argus)", GENERIC_READ, 0, nullptr,
+	PWSTR ProgramData = nullptr;
+	if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramData, KF_FLAG_DEFAULT, nullptr, &ProgramData))) return {};
+	std::wstring Path(ProgramData);
+	CoTaskMemFree(ProgramData);
+	return Path + L"\\Argus\\sigma_windows_policy.yml";
+}
+
+static const char* RegisterRuleStatusName(Argus::Policy::ERegisterRuleStatus Status)
+{
+	using Argus::Policy::ERegisterRuleStatus;
+	switch (Status)
+	{
+	case ERegisterRuleStatus::Success: return "success";
+	case ERegisterRuleStatus::AlreadyRegistered: return "already_registered";
+	case ERegisterRuleStatus::InvalidRule: return "invalid_rule";
+	case ERegisterRuleStatus::UnsupportedEventType: return "unsupported_event_type";
+	case ERegisterRuleStatus::UnsupportedField: return "unsupported_field";
+	case ERegisterRuleStatus::UnsupportedMatch: return "unsupported_match";
+	case ERegisterRuleStatus::LimitExceeded: return "limit_exceeded";
+	case ERegisterRuleStatus::AllocationFailed: return "allocation_failed";
+	case ERegisterRuleStatus::DuplicateIdConflict: return "duplicate_id_conflict";
+	default: return "unknown_status";
+	}
+}
+
+static bool LoadAndRegisterRules(HANDLE Device, const std::wstring& Path, bool Explicit)
+{
+	if (Path.empty()) return !Explicit;
+	const DWORD Attributes = GetFileAttributesW(Path.c_str());
+	if (Attributes == INVALID_FILE_ATTRIBUTES && !Explicit)
+	{
+		const DWORD Code = GetLastError();
+		if (Code == ERROR_FILE_NOT_FOUND || Code == ERROR_PATH_NOT_FOUND) return true;
+	}
+	Argus::Rules::FLoadResult Loaded;
+	std::string Error;
+	if (!Argus::Rules::LoadRulesFile(Path, Loaded, Error))
+	{
+		Log(stderr, 0, "ERROR", "rules.load_failed", "reason=%s", Error.c_str());
+		return false;
+	}
+	Log(stdout, 0, "INFO", "rules.parsed", "documents=%u encodable=%zu rejected=%zu",
+		Loaded.Documents, Loaded.Rules.size(), Loaded.Rejected.size());
+	for (const auto& Rejection : Loaded.Rejected)
+		Log(stderr, 0, "WARN", "rules.rejected", "reason=\"%s\"", Rejection.c_str());
+	if (Loaded.Rules.empty()) return !Explicit;
+	size_t Registered = 0;
+	// Version 1 sends one rule and its operation records per IOCTL; the acknowledgement describes that rule.
+	for (const auto& Rule : Loaded.Rules)
+	{
+		std::vector<uint8_t> Request;
+		try { Request = Argus::Rules::SerializeRule(Rule); }
+		catch (const std::exception& Ex)
+		{
+			Log(stderr, 0, "WARN", "rules.rejected", "id=%s reason=\"%s\"", Rule.Id.c_str(), Ex.what());
+			continue;
+		}
+		DWORD Returned = 0;
+		Argus::DeviceControl::FRegisterRule Response{};
+		if (!DeviceIoControl(Device, Argus::DeviceControl::IoctlCodeRegisterRule,
+			Request.data(), static_cast<DWORD>(Request.size()),
+			&Response, static_cast<DWORD>(sizeof(Response)), &Returned, nullptr))
+		{
+			const DWORD Code = GetLastError();
+			Log(stderr, 0, "ERROR", "rules.register_failed", "id=%s win32=%lu registered=%zu remaining=%zu",
+				Rule.Id.c_str(), Code, Registered, Loaded.Rules.size() - Registered);
+			// The current driver returns ERROR_INVALID_FUNCTION for this IOCTL.
+			// Do not claim any of the unsent rules were installed.
+			return false;
+		}
+		if (Returned != sizeof(Response) ||
+			Response.Version != Argus::DeviceControl::FRegisterRuleHeaderRP::HeaderVersion ||
+			Response.TotalBytes != sizeof(Response))
+		{
+			Log(stderr, 0, "ERROR", "rules.register_failed", "id=%s reason=invalid_response bytes=%lu version=%u",
+				Rule.Id.c_str(), Returned, Response.Version);
+			return false;
+		}
+		if (Response.Status != Argus::Policy::ERegisterRuleStatus::Success &&
+			Response.Status != Argus::Policy::ERegisterRuleStatus::AlreadyRegistered)
+		{
+			Log(stderr, 0, "ERROR", "rules.register_failed", "id=%s reason=%s status=%u predicate_index=%u instruction_index=%u registered=%zu",
+				Rule.Id.c_str(), RegisterRuleStatusName(Response.Status), static_cast<uint32>(Response.Status),
+				Response.FailedPredicateIndex, Response.FailedInstructionIndex, Registered);
+			return false;
+		}
+		if (Response.FailedPredicateIndex != Argus::DeviceControl::RuleNoIndex ||
+			Response.FailedInstructionIndex != Argus::DeviceControl::RuleNoIndex)
+		{
+			Log(stderr, 0, "ERROR", "rules.register_failed", "id=%s reason=invalid_success_response", Rule.Id.c_str());
+			return false;
+		}
+		++Registered;
+	}
+	Log(stdout, 0, "INFO", "rules.registered", "count=%zu", Registered);
+	return true;
+}
+
+static int RunAgent(HANDLE StopEvent, const std::wstring* RulePath = nullptr)
+{
+	HANDLE Device = CreateFileW(LR"(\\.\Argus)", GENERIC_READ | GENERIC_WRITE, 0, nullptr,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (Device == INVALID_HANDLE_VALUE)
 	{
@@ -855,6 +959,13 @@ static int RunAgent(HANDLE StopEvent)
 	}
 
 	Log(stdout, 0, "INFO", "process.register", "role=agent pid=%lu", GetCurrentProcessId());
+	const std::wstring Path = RulePath == nullptr ? DefaultRulePath() : *RulePath;
+	const bool RulesInstalled = LoadAndRegisterRules(Device, Path, RulePath != nullptr);
+	if (!RulesInstalled && RulePath != nullptr)
+	{
+		CloseHandle(Device);
+		return 1;
+	}
 	if (GServiceStatusHandle != nullptr)
 	{
 		ReportServiceStatus(SERVICE_RUNNING);
@@ -1374,9 +1485,9 @@ static void WINAPI ServiceMain(DWORD, LPWSTR*)
 	GServiceLog = nullptr;
 }
 
-int main(int Argc, char* Argv[])
+int wmain(int Argc, wchar_t* Argv[])
 {
-	if (Argc == 2 && std::strcmp(Argv[1], "--service") == 0)
+	if (Argc == 2 && std::wcscmp(Argv[1], L"--service") == 0)
 	{
 		SERVICE_TABLE_ENTRYW Services[] = {
 			{ const_cast<LPWSTR>(AgentServiceName), ServiceMain },
@@ -1384,9 +1495,25 @@ int main(int Argc, char* Argv[])
 		};
 		return StartServiceCtrlDispatcherW(Services) ? 0 : 1;
 	}
+	if (Argc == 3 && (std::wcscmp(Argv[1], L"--sigma") == 0 ||
+		std::wcscmp(Argv[1], L"--validate-sigma") == 0))
+	{
+		const std::wstring Path(Argv[2]);
+		if (std::wcscmp(Argv[1], L"--validate-sigma") == 0)
+		{
+			Argus::Rules::FLoadResult Loaded;
+			std::string Error;
+			if (!Argus::Rules::LoadRulesFile(Path, Loaded, Error)) { std::fprintf(stderr, "%s\n", Error.c_str()); return 1; }
+			std::printf("documents=%u encodable=%zu rejected=%zu\n", Loaded.Documents, Loaded.Rules.size(), Loaded.Rejected.size());
+			for (const auto& Rejection : Loaded.Rejected) std::printf("%s\n", Rejection.c_str());
+			return Loaded.Rules.empty() ? 1 : 0;
+		}
+		SetConsoleOutputCP(CP_UTF8);
+		return RunAgent(nullptr, &Path);
+	}
 	if (Argc != 1)
 	{
-		std::fprintf(stderr, "Usage: ArgusAgent.exe [--service]\n");
+		std::fprintf(stderr, "Usage: ArgusAgent.exe [--service | --sigma <path> | --validate-sigma <path>]\n");
 		return 1;
 	}
 	SetConsoleOutputCP(CP_UTF8);

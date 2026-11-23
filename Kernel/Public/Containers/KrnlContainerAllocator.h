@@ -2,7 +2,7 @@
 
 
 #include "Kernel/Public/Misc/KernelDefines.h"
-#include "Kernel/Public/Containers/KrnlPoolType.h"
+#include "Kernel/Public/Containers/KrnlContainerType.h"
 #include "Core/Public/Misc/Types.h"
 #include "Core/Public/Templates/TypeTraits.h"
 

@@ -48,13 +48,13 @@ public:
 	{
 	public:
 		// The policy evaluator can pass its decision to this dispatcher.
-		static Argus::Minifilter::FCreatePreOperationDecision ApplyPreDecision(
+		static Argus::Minifilter::FPreOperationDecision ApplyPreDecision(
 			FMinifilter& Filter, const Argus::Minifilter::FCreateOperationDescriptor& Descriptor) noexcept;
 
-		static Argus::Minifilter::FCreatePreOperationDecision ApplyPreDecisionDeferred(
+		static Argus::Minifilter::FPreOperationDecision ApplyPreDecisionDeferred(
 			FMinifilter& Filter, const Argus::Minifilter::FCreateOperationDescriptor& Descriptor) noexcept;
 
-		static Argus::Minifilter::FCreatePostOperationDecision ApplyPostDecision(
+		static Argus::Minifilter::FPostOperationDecision ApplyPostDecision(
 			PFLT_CALLBACK_DATA CallbackData, PCFLT_RELATED_OBJECTS FltObjects, const Argus::Minifilter::FCreateOperationDescriptor& Descriptor) noexcept;
 	};
 };

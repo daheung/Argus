@@ -67,75 +67,83 @@ namespace Argus::DeviceControl
 		static constexpr uint32 RecordAlignment = 8u;
 
 	public:
-		/* File-operation category used by policy filtering; CREATE for this record type. */
+		/* Operation category; always Create for this record. */
 		EMinifilterPolicyOperationFlags OperationFlags;
 
-		/* Process ID attributed to the thread that requested the file open. */
+		/* Process ID of the CREATE requestor. */
 		uint32 RequestorPid;
 
-		/* Thread ID attributed to the file-open request, when available. */
+		/* Thread ID of the CREATE requestor, or 0 when unavailable. */
 		uint32 RequestorTid;
 
-		/* Whether the requester originated in user mode or kernel mode. */
+		/* Requestor mode reported for CREATE. */
 		EProcessorMode ProcessorMode = EProcessorMode::Unknown;
 
-		/* Time the pre-create request was observed: UTC 100-ns ticks since 1601-01-01. */
+		/* Pre-create observation time: UTC 100-ns intervals since 1601-01-01. */
 		uint64 ObservedAt{};
 
-		/* Raw FLT_IO_PARAMETER_BLOCK::OperationFlags (SL_* flags) for this request. */
+		/* Raw FLT_IO_PARAMETER_BLOCK::OperationFlags (SL_* flags) for CREATE. */
 		uint8 FileOperationFlags;
 		
-		/* Requested FILE_SHARE_* access mask. */
+		/* Requested FILE_SHARE_* flags. */
 		uint16 FileSharedAccess;
 		
-		/* File attributes supplied with the create request. */
+		/* File attributes supplied with CREATE. */
 		uint16 FileAttributes;
 
-		/* FILE_* create disposition extracted from the high byte of Create.Options. */
+		/* FILE_* disposition from the high byte of Create.Options. */
 		uint32 FileDisposition;
 		
-		/* Requested access rights from the create security context. */
+		/* DesiredAccess from the CREATE security context, or 0 when absent. */
 		uint32 FileDesiredAccess;
 
-		/* Minifilter policy decision for the pre-create phase. */
+		/* Minifilter decision recorded for pre-create. */
 		FFltIrpPreOperationDecision PreOperationDecision{};
 		
-		/* Minifilter policy decision for the post-create phase. */
+		/* Minifilter decision recorded for post-create. */
 		FFltIrpPostOperationDecision PostOperationDecision{};
 
-		/* Volume name captured before the create, with its status and payload range. */
+		/* Volume name captured before CREATE; status and payload location. */
+		EStringStatus VolumeNameStatus = EStringStatus::NotApplicable;
 		FStringDescriptor VolumeName;
 		
-		/* Opened file path captured before the create, with its status and payload range. */
+		/* Opened file path captured before CREATE; status and payload location. */
+		EStringStatus FilePathNameStatus = EStringStatus::NotApplicable;
 		FStringDescriptor FilePathName;
 
-		/* Volume name captured after a successful create, if available. */
+		/* Volume name captured during post-create, if available. */
+		EStringStatus CompletionVolumeNameStatus = EStringStatus::NotApplicable;
 		FStringDescriptor CompletionVolumeName;
 		
-		/* Normalized file path captured after a successful create, if available. */
+		/* Normalized file path captured during post-create, if available. */
+		EStringStatus CompletionFilePathNameStatus = EStringStatus::NotApplicable;
 		FStringDescriptor CompletionFilePathName;
 
-		/* Reserved count of internal attempts associated with this create request. */
+		/* Reserved for internal CREATE attempts; currently always 0. */
 		uint32 InternalCallCount;
 		
-		/* Raw IoStatus.Information value returned by the create operation. */
+		/* Raw IoStatus.Information from CREATE completion. */
 		uint64 CompletionInformation;
 		
-		/* NTSTATUS returned by the create operation, stored as a 32-bit value. */
+		/* CREATE completion NTSTATUS stored as a 32-bit value. */
 		uint32 CompletionStatus;
 
+		/* Matching CLOSE pre-operation time in UTC 100-ns intervals; valid when bWasIrpClosed is true. */
 		int64 IrpClosedAt;
 
-		/* Reserved for a matching IRP_MJ_CLOSE on this create's file object. */
+		/* Whether a matching IRP_MJ_CLOSE was collected before CREATE retrieval. */
 		bool bWasIrpClosed;
 
+		/* Matching CLEANUP post-operation time in UTC 100-ns intervals; valid when bWasIrpCleanedUp is true. */
 		int64 IrpCleanupCompletionAt;
 
+		/* Raw IoStatus.Information from matching CLEANUP; valid when bWasIrpCleanedUp is true. */
 		uint64 IrpCleanupCompletionInformation;
 
+		/* Matching CLEANUP NTSTATUS as a 32-bit value; valid when bWasIrpCleanedUp is true. */
 		uint32 IrpCleanupCompletionStatus;
 		
-		/* Reserved for a matching IRP_MJ_CLEANUP on this create's file object. */
+		/* Whether a matching IRP_MJ_CLEANUP was collected before CREATE retrieval. */
 		bool bWasIrpCleanedUp;
 
 		/* FILE_SYNCHRONOUS_IO_ALERT or FILE_SYNCHRONOUS_IO_NONALERT was requested. */
@@ -168,6 +176,18 @@ namespace Argus::DeviceControl
 		/* FILE_OPEN_REPARSE_POINT was requested. */
 		bool bIsOpenReparsePoint;
 
+		/* Zero-filled trailing bytes used to align the next record to RecordAlignment. */
 		uint64 PaddingBytes;
 	};
+
+	// Status and payload positions retain the version 1 wire layout.
+	static_assert(sizeof(FFltIrpCreateOperationRecord) == 232);
+	static_assert(offsetof(FFltIrpCreateOperationRecord, VolumeNameStatus) == 56);
+	static_assert(offsetof(FFltIrpCreateOperationRecord, VolumeName) == 64);
+	static_assert(offsetof(FFltIrpCreateOperationRecord, FilePathNameStatus) == 80);
+	static_assert(offsetof(FFltIrpCreateOperationRecord, FilePathName) == 88);
+	static_assert(offsetof(FFltIrpCreateOperationRecord, CompletionVolumeNameStatus) == 104);
+	static_assert(offsetof(FFltIrpCreateOperationRecord, CompletionVolumeName) == 112);
+	static_assert(offsetof(FFltIrpCreateOperationRecord, CompletionFilePathNameStatus) == 128);
+	static_assert(offsetof(FFltIrpCreateOperationRecord, CompletionFilePathName) == 136);
 }

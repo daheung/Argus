@@ -19,9 +19,7 @@ namespace Argus::Minifilter
 	};
 }
 
-class FCloseOperationContainer :
-	public FOperationContainer<Argus::Minifilter::FCloseOperationDescriptor, EPoolType::Paged, Argus::Minifilter::ELockType::Wait>
-{
-public:
-	using Super = FOperationContainer<Argus::Minifilter::FCloseOperationDescriptor, EPoolType::Paged, Argus::Minifilter::ELockType::Wait>;
-};
+using FCloseOperationContainer = FOperationContainer<
+	Argus::Minifilter::FCloseOperationDescriptor,
+	EPoolType::Paged,
+	EContainerLockType::Wait>;

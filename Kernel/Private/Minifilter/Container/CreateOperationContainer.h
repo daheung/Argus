@@ -1,38 +1,13 @@
 #pragma once
 
 #include "Kernel/Private/Minifilter/Container/OperationContainerBase.h"
+#include "Kernel/Private/Minifilter/MinifilterTypes.h"
 #include "Kernel/Public/Containers/KrnlSpscCircularQueue.h"
 #include "Kernel/Public/Containers/KrnlString.h"
 #include "Kernel/Public/Misc/KernelTypes.h"
 
 namespace Argus::Minifilter
 {
-	enum class ECreatePreOperationDecision : uint8
-	{
-		PreOperationPass,
-		PreOperationBlock,
-		PreOperationPending,
-	};
-
-	enum class ECreatePostOperationDecision : uint8
-	{
-		PostOperationPass,
-		PostOperationBlock,
-		PostOperationMoreProcessingRequired,
-	};
-
-	struct FCreatePreOperationDecision
-	{
-		ECreatePreOperationDecision Decision = ECreatePreOperationDecision::PreOperationPass;
-		NTSTATUS BlockStatus = STATUS_ACCESS_DENIED;
-	};
-
-	struct FCreatePostOperationDecision
-	{
-		ECreatePostOperationDecision Decision = ECreatePostOperationDecision::PostOperationPass;
-		NTSTATUS BlockStatus = STATUS_ACCESS_DENIED;
-	};
-
 	enum class EOperationStringStatus : uint8
 	{
 		NotApplicable,
@@ -59,8 +34,8 @@ namespace Argus::Minifilter
 		ACCESS_MASK DesiredAccess = 0;
 
 		//EFilterMode FilterMode = EFilterMode::Pass;
-		FCreatePreOperationDecision PreOperationDecision{};
-		FCreatePostOperationDecision PostOperationDecision{};
+		FPreOperationDecision PreOperationDecision{};
+		FPostOperationDecision PostOperationDecision{};
 
 		EOperationStringStatus VolumeNameStatus = EOperationStringStatus::NotApplicable;
 		EOperationStringStatus FilePathNameStatus = EOperationStringStatus::NotApplicable;
@@ -91,9 +66,7 @@ namespace Argus::Minifilter
 	};
 }
 
-class FCreateOperationContainer :
-	public FOperationContainer<Argus::Minifilter::FCreateOperationDescriptor, EPoolType::Paged, Argus::Minifilter::ELockType::Wait>
-{
-public:
-	using Super = FOperationContainer<Argus::Minifilter::FCreateOperationDescriptor, EPoolType::Paged, Argus::Minifilter::ELockType::Wait>;
-};
+using FCreateOperationContainer = FOperationContainer<
+	Argus::Minifilter::FCreateOperationDescriptor,
+	EPoolType::Paged,
+	EContainerLockType::Wait>;

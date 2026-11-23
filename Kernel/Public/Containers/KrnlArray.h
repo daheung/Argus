@@ -49,7 +49,7 @@ public:
 		return *this;
 	}
 
-	FORCEINLINE TIndexedContainerIterator& operator++(int) noexcept
+	FORCEINLINE TIndexedContainerIterator operator++(int) noexcept
 	{
 		TIndexedContainerIterator Tmp(*this);
 		++Index;
@@ -72,12 +72,12 @@ public:
 		return !(operator==(Other));
 	}
 
-	FORCEINLINE ElementType& operator*()
+	FORCEINLINE ElementType& operator*() const noexcept
 	{
 		return (*Container)[Index];
 	}
 
-	FORCEINLINE ElementType* operator->()
+	FORCEINLINE ElementType* operator->() const noexcept
 	{
 		return &(*Container)[Index];
 	}
@@ -86,6 +86,10 @@ private:
 	ContainerType* Container;
 	SizeType Index;
 };
+
+template <typename ContainerType, typename ElementType, typename SizeType>
+using TIndexedContainerConstIterator =
+	TIndexedContainerIterator<const ContainerType, const ElementType, SizeType>;
 
 template <EPoolType InPoolType, typename InElementType, typename InAllocatorType>
 class TKrnlArray
@@ -101,6 +105,7 @@ public:
 	typedef typename AllocatorType::SizeType SizeType;
 
 	typedef TIndexedContainerIterator<TKrnlArray<PoolType, ElementType, AllocatorType>, ElementType, SizeType> TIterator;
+	typedef TIndexedContainerConstIterator<TKrnlArray<PoolType, ElementType, AllocatorType>, ElementType, SizeType> TConstIterator;
 
 private:
 	typedef typename TMakeUnsigned<SizeType>::Type USizeType;
@@ -782,6 +787,20 @@ public:
 		return INDEX_NONE;
 	}
 
+	NODISCARD FORCEINLINE SizeType FindAll(const ElementType& Element) const noexcept
+	{
+		return this->FindAllByPredicate([&Element](const ElementType& Elem) -> bool {
+			return Elem == Element;
+		});
+	}
+
+	template <typename Predicate>
+	FORCEINLINE SizeType FindAllByPredicate(Predicate Pred) const noexcept
+	{
+		return 0;
+	}
+
+public:
 	FORCEINLINE SizeType PushUninitialized(SizeType Count = 1)
 	{
 		if (this->ArrayNum < 0 || Count < 0)
@@ -958,6 +977,16 @@ public:
 	NODISCARD FORCEINLINE TIterator End() noexcept
 	{
 		return TIterator(*this, ArrayNum);
+	}
+
+	NODISCARD FORCEINLINE TConstIterator Begin() const noexcept
+	{
+		return TConstIterator(*this);
+	}
+
+	NODISCARD FORCEINLINE TConstIterator End() const noexcept
+	{
+		return TConstIterator(*this, ArrayNum);
 	}
 
 private:

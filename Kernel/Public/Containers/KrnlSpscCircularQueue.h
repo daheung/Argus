@@ -52,6 +52,7 @@ public:
 		"TKrnlSpscCircularQueue allocator element type must match ElementType");
 
 	typedef TIndexedContainerIterator<TKrnlSpscCircularQueue<PoolType, ElementType, AllocatorType>, ElementType, SizeType> TIterator;
+	typedef TIndexedContainerConstIterator<TKrnlSpscCircularQueue<PoolType, ElementType, AllocatorType>, ElementType, SizeType> TConstIterator;
 
 private:
 	using USizeType = typename TMakeUnsigned<SizeType>::Type;
@@ -559,6 +560,16 @@ public:
 	NODISCARD FORCEINLINE TIterator End() noexcept
 	{
 		return TIterator(*this, Num());
+	}
+
+	NODISCARD FORCEINLINE TConstIterator Begin() const noexcept
+	{
+		return TConstIterator(*this);
+	}
+
+	NODISCARD FORCEINLINE TConstIterator End() const noexcept
+	{
+		return TConstIterator(*this, Num());
 	}
 
 private:
